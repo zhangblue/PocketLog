@@ -1,0 +1,16 @@
+:root {
+  --color-ink: #183c35;
+  --color-green: #4f8a75;
+  --color-mint: #dceae4;
+  --color-paper: #f5f3ec;
+  --color-card: #fffefa;
+  --color-text: #20342f;
+  --color-muted: #59645f;
+  --color-income: #2d6a57;
+  --color-line: #e2e5de;
+  --color-accent: #e5a05e;
+  --color-danger: #b6574e;
+  --radius-card: 16px;
+  --radius-control: 10px;
+  --focus-ring: 0 0 0 4px #0d2b25;
+}
