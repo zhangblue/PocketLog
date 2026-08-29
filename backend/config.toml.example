@@ -1,0 +1,14 @@
+# Copy this file to config.toml next to the release executable, then set the
+# PostgreSQL database name and credentials appropriate for the deployment.
+database_url = "postgres://qizhang@127.0.0.1:5432/qizhang"
+bind_addr = "127.0.0.1:3000"
+pool_min = 1
+pool_max = 10
+request_timeout_secs = 15
+database_connect_timeout_secs = 5
+pool_acquire_timeout_secs = 5
+body_limit_bytes = 1048576
+
+[logging]
+level = "info"
+retention_days = 14

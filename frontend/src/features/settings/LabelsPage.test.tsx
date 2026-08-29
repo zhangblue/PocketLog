@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { sampleCategories } from '../../domain/sampleData'
 import { FinanceProvider } from '../../app/FinanceProvider'
-import { createLabelRepository } from '../../data/labelRepository'
-import { createTransactionRepository } from '../../data/transactionRepository'
 import { changeInput, click, keyDown, render } from '../../test/render'
+import { createFixtureApi } from '../../test/financeApi'
 import { LabelsPage } from './LabelsPage'
 
 describe('LabelsPage', () => {
@@ -18,7 +17,7 @@ describe('LabelsPage', () => {
 
   it('未使用分类删除前要求确认', async () => {
     const unused = { id: 'unused', name: '闲置', emoji: '🧺', color: '#123456', kind: 'expense' as const, active: false }
-    const { container } = await render(<FinanceProvider initialCategories={[...sampleCategories, unused]}><LabelsPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ categories: [...sampleCategories, unused] })}><LabelsPage /></FinanceProvider>)
 
     await click(container.querySelector<HTMLElement>('[data-category="unused"] [data-delete]')!)
 
@@ -51,7 +50,7 @@ describe('LabelsPage', () => {
 
   it('确认对话框初始聚焦取消按钮，循环 Tab，并在 Escape 后归还触发焦点', async () => {
     const unused = { id: 'unused', name: '闲置', emoji: '🧺', color: '#123456', kind: 'expense' as const, active: false }
-    const { container } = await render(<FinanceProvider initialCategories={[...sampleCategories, unused]}><LabelsPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ categories: [...sampleCategories, unused] })}><LabelsPage /></FinanceProvider>)
     const trigger = container.querySelector<HTMLButtonElement>('[data-category="unused"] [data-delete]')!
 
     await click(trigger)
@@ -74,7 +73,7 @@ describe('LabelsPage', () => {
 
   it('成功删除触发器后将焦点移到页面标题', async () => {
     const unused = { id: 'unused', name: '闲置', emoji: '🧺', color: '#123456', kind: 'expense' as const, active: false }
-    const { container } = await render(<FinanceProvider initialCategories={[...sampleCategories, unused]}><LabelsPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ categories: [...sampleCategories, unused] })}><LabelsPage /></FinanceProvider>)
 
     await click(container.querySelector<HTMLButtonElement>('[data-category="unused"] [data-delete]')!)
     await click(container.querySelector<HTMLButtonElement>('[data-confirm-delete]')!)
@@ -84,7 +83,7 @@ describe('LabelsPage', () => {
 
   it('取消确认对话框后将焦点归还给打开它的按钮', async () => {
     const unused = { id: 'unused', name: '闲置', emoji: '🧺', color: '#123456', kind: 'expense' as const, active: false }
-    const { container } = await render(<FinanceProvider initialCategories={[...sampleCategories, unused]}><LabelsPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ categories: [...sampleCategories, unused] })}><LabelsPage /></FinanceProvider>)
     const trigger = container.querySelector<HTMLButtonElement>('[data-category="unused"] [data-delete]')!
 
     await click(trigger)
@@ -96,7 +95,7 @@ describe('LabelsPage', () => {
 
   it('没有同类型启用迁移目标时禁用确认并在对话框说明原因', async () => {
     const onlyExpense = [{ id: 'food', name: '餐饮', emoji: '🍜', color: '#4f8a75', kind: 'expense' as const, active: true }]
-    const { container } = await render(<FinanceProvider initialCategories={onlyExpense}><LabelsPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ categories: onlyExpense })}><LabelsPage /></FinanceProvider>)
 
     await click(container.querySelector<HTMLButtonElement>('[data-category="food"] [data-migrate]')!)
     const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
@@ -116,19 +115,7 @@ describe('LabelsPage', () => {
   })
 
   it('迁移回滚失败时在对话框内保留可恢复提示', async () => {
-    let transactionWrites = 0
-    const storage: Storage = {
-      ...localStorage,
-      setItem: (key, value) => {
-        if (key === 'qizhang.labels.v1') throw new Error('labels failed')
-        if (key === 'qizhang.transactions.v1') {
-          transactionWrites += 1
-          if (transactionWrites > 1) throw new Error('rollback failed')
-        }
-        localStorage.setItem(key, value)
-      },
-    }
-    const { container } = await render(<FinanceProvider repository={createTransactionRepository(storage)} labelRepository={createLabelRepository(storage)}><LabelsPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ fail: { label: true } })}><LabelsPage /></FinanceProvider>)
 
     await click(container.querySelector<HTMLButtonElement>('[data-category="food"] [data-migrate]')!)
     await click(container.querySelector<HTMLButtonElement>('[data-confirm-delete]')!)

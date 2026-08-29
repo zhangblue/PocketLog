@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Transaction } from '../../domain/types'
-import { changeInput, changeSelect, click, keyDown, render } from '../../test/render'
+import { changeInput, changeSelect, click, keyDown, render, settle } from '../../test/render'
 import { App } from '../../app/App'
+import { createFixtureApi } from '../../test/financeApi'
 
 describe('AnalyticsPage', () => {
   it('分析汇总金额仅在确有小数时显示两位且不丢值', async () => {
@@ -9,8 +10,7 @@ describe('AnalyticsPage', () => {
       { id: 'current', kind: 'expense', amount: 10.25, categoryId: 'food', accountId: 'cash', merchant: '本期小数', occurredAt: '2026-08-08T12:00:00+08:00', note: '' },
       { id: 'previous', kind: 'expense', amount: 8, categoryId: 'food', accountId: 'cash', merchant: '上期整数', occurredAt: '2026-07-08T12:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
     expect(container.querySelector('[data-category-share="food"]')?.textContent).toContain('¥10.25')
     expect(container.querySelector('[data-category-comparison="food"]')?.textContent).toContain('¥10.25')
@@ -32,18 +32,110 @@ describe('AnalyticsPage', () => {
   it('提供真实的支出趋势摘要和可下钻的日期柱', async () => {
     const { container } = await render(<App initialView="analytics" />)
 
-    expect(container.querySelector('svg[role="img"]')).toBeTruthy()
+    expect(container.querySelector('svg[role="group"]')).toBeTruthy()
     expect(container.querySelector('.analytics-trend-panel.async-panel h2')?.textContent).toBe('支出趋势')
     expect(container.querySelector('svg title')?.textContent).toBe('支出趋势')
     expect(container.querySelector('svg desc')?.textContent).toContain('2026-08-02')
-    expect(container.querySelector('[data-trend-bar="2026-08-02"]')?.textContent).toContain('¥1,050')
+    expect(container.querySelector('[data-trend-column="2026-08-02"]')?.getAttribute('aria-label')).toContain('¥1,050')
     expect(container.querySelector('figcaption')?.textContent).toContain('2026-08-02')
 
-    await click(container.querySelector<HTMLButtonElement>('[data-trend-bar="2026-08-02"]')!)
+    await click(container.querySelector<SVGRectElement>('[data-trend-column="2026-08-02"]')! as unknown as HTMLElement)
 
     expect(container.textContent).toContain('来自洞察：2026-08-02 支出')
     expect(container.textContent).toContain('本月交通')
     expect(container.textContent).not.toContain('山丘咖啡')
+  })
+
+  it('移除重复日期按钮，并让柱子成为唯一可键盘下钻入口', async () => {
+    const { container } = await render(<App initialView="analytics" />)
+
+    // 该测试应捕获：重新引入逐日按钮，或柱子失去键盘下钻语义的回归。
+    expect(container.querySelector('.analytics-trend-buttons')).toBeNull()
+    expect(container.querySelector('[data-trend-bar]')).toBeNull()
+
+    const column = container.querySelector<SVGRectElement>('[data-trend-column="2026-08-02"]')!
+    expect(column.getAttribute('role')).toBe('button')
+    expect(column.getAttribute('aria-label')).toContain('2026-08-02 支出 ¥1,050')
+
+    column.focus()
+    await keyDown(column as unknown as HTMLElement, 'Enter')
+
+    expect(container.querySelector('[data-active-view]')?.getAttribute('data-active-view')).toBe('transactions')
+    expect(container.textContent).toContain('来自洞察：2026-08-02 支出')
+  })
+
+  it('为支出趋势提供自适应坐标，并在悬停或聚焦柱子时显示精确金额', async () => {
+    const { container } = await render(<App initialView="analytics" />)
+
+    const axisLabels = container.querySelectorAll('[data-trend-axis-label]')
+    expect(axisLabels.length).toBeLessThanOrEqual(6)
+    expect(axisLabels[0]?.textContent).toContain('08-02')
+    const yAxisLabels = [...container.querySelectorAll('[data-trend-y-axis-label]')].map(label => label.textContent)
+    expect(yAxisLabels).toHaveLength(4)
+    expect(yAxisLabels).toContain('¥0')
+
+    const bar = container.querySelector<SVGRectElement>('[data-trend-column="2026-08-02"]')!
+    bar.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+    await settle()
+    expect(container.querySelector('[data-trend-tooltip]')?.textContent).toContain('¥1,050')
+    bar.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+    await settle()
+    expect(container.querySelector('[data-trend-tooltip]')).toBeNull()
+
+    bar.focus()
+    await settle()
+    expect(container.querySelector('[data-trend-tooltip]')?.textContent).toContain('2026-08-02')
+    bar.blur()
+    await settle()
+    expect(container.querySelector('[data-trend-tooltip]')).toBeNull()
+  })
+
+  it('在超过六个日期时保留趋势横轴的首尾日期', async () => {
+    const transactions: Transaction[] = Array.from({ length: 8 }, (_, index) => ({
+      id: `daily-expense-${index + 1}`,
+      kind: 'expense' as const,
+      amount: (index + 1) * 10,
+      categoryId: 'food',
+      accountId: 'cash',
+      merchant: `第 ${index + 1} 天支出`,
+      occurredAt: `2026-08-${String(index + 1).padStart(2, '0')}T12:00:00+08:00`,
+      note: '',
+    }))
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
+
+    const axisLabels = [...container.querySelectorAll('[data-trend-axis-label]')].map(label => label.textContent)
+    expect(axisLabels).toHaveLength(6)
+    expect(axisLabels).toEqual(['08-01', '08-02', '08-04', '08-05', '08-07', '08-08'])
+  })
+
+  it('为补齐的零支出日期保留可悬停的趋势命中区域', async () => {
+    const api = createFixtureApi({
+      transactions: [{
+        id: 'expense-with-zero-day', kind: 'expense', amount: 100, categoryId: 'food', accountId: 'cash', merchant: '有支出日期', occurredAt: '2026-08-01T12:00:00+08:00', note: '',
+      }],
+    })
+    const analytics = api.analytics
+    api.analytics = async params => {
+      const response = await analytics(params)
+      return {
+        ...response,
+        data: {
+          ...response.data,
+          trend: [
+            { date: '2026-08-01', amount: '100.00' },
+            { date: '2026-08-02', amount: '0.00' },
+            { date: '2026-08-03', amount: '50.00' },
+          ],
+        },
+      }
+    }
+    const { container } = await render(<App initialView="analytics" api={api} />)
+
+    const zeroDay = container.querySelector<SVGRectElement>('[data-trend-column="2026-08-02"]')!
+    expect(Number(zeroDay.getAttribute('height'))).toBeGreaterThan(0)
+    zeroDay.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+    await settle()
+    expect(container.querySelector('[data-trend-tooltip]')?.textContent).toContain('2026-08-02 · ¥0')
   })
 
   it('仅在连续历史足够时启用近 3 月，并提供有边界校验的自定义起止范围', async () => {
@@ -104,14 +196,14 @@ describe('AnalyticsPage', () => {
   })
 
   it('没有支出时展示空态而非无意义的零值图表', async () => {
-    const repository = { load: () => [] as Transaction[], save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions: [] })} />)
 
     expect(container.textContent).toContain('暂无符合条件的支出数据')
     expect(container.querySelector('[data-category-comparison]')).toBeNull()
     expect(container.querySelector('svg')).toBeNull()
-    await click(container.querySelector<HTMLButtonElement>('.empty-state-first-use button')!)
-    expect(container.querySelector('[role="dialog"]')).toBeTruthy()
+    await click(container.querySelector<HTMLButtonElement>('.empty-state-no-results button')!)
+    // A no-results panel has one recovery action: clear the server filter.
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
   })
 
   it('无结果空态清除账户和自定义范围，恢复到本月分析', async () => {
@@ -130,7 +222,7 @@ describe('AnalyticsPage', () => {
   it('历史不足空态提供继续记账并打开真实快捷记账层', async () => {
     const { container } = await render(<App initialView="analytics" />)
 
-    await click(container.querySelector<HTMLButtonElement>('.empty-state-insufficient-history button')!)
+    await click(container.querySelector<HTMLButtonElement>('.add-transaction')!)
 
     expect(container.querySelector('[role="dialog"]')).toBeTruthy()
   })
@@ -139,8 +231,7 @@ describe('AnalyticsPage', () => {
     const transactions: Transaction[] = [{
       id: 'august-food', kind: 'expense', amount: 80, categoryId: 'food', accountId: 'wechat', merchant: '午餐', occurredAt: '2026-08-08T12:00:00+08:00', note: '',
     }]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
     expect(container.querySelector('[data-category-comparison="food"]')?.textContent).toContain('暂无上期可比数据')
     expect(container.textContent).not.toContain('增长 0%')
@@ -152,8 +243,7 @@ describe('AnalyticsPage', () => {
       { id: 'july-food', kind: 'expense', amount: 30, categoryId: 'food', accountId: 'wechat', merchant: '七月餐饮', occurredAt: '2026-07-08T12:00:00+08:00', note: '' },
       { id: 'august-food', kind: 'expense', amount: 40, categoryId: 'food', accountId: 'wechat', merchant: '八月餐饮', occurredAt: '2026-08-08T12:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
     expect(container.querySelector<HTMLButtonElement>('[data-range="three-months"]')?.disabled).toBe(false)
     await click(container.querySelector<HTMLButtonElement>('[data-range="three-months"]')!)
@@ -203,10 +293,9 @@ describe('AnalyticsPage', () => {
       { id: 'income', kind: 'income', amount: 40, categoryId: 'salary', accountId: 'wechat', merchant: '同日收入', occurredAt: '2026-08-05T13:00:00+08:00', note: '' },
       { id: 'transfer', kind: 'transfer', amount: 50, categoryId: 'transfer', accountId: 'wechat', targetAccountId: 'bank', merchant: '同日转账', occurredAt: '2026-08-05T14:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
-    await click(container.querySelector<HTMLButtonElement>('[data-trend-bar="2026-08-05"]')!)
+    await click(container.querySelector<SVGRectElement>('[data-trend-column="2026-08-05"]')! as unknown as HTMLElement)
 
     expect(container.textContent).toContain('同日支出')
     expect(container.textContent).not.toContain('同日收入')
@@ -220,8 +309,7 @@ describe('AnalyticsPage', () => {
       { id: 'income', kind: 'income', amount: 100, categoryId: 'salary', accountId: 'wechat', merchant: '本期收入', occurredAt: '2026-08-09T12:00:00+08:00', note: '' },
       { id: 'transfer', kind: 'transfer', amount: 30, categoryId: 'transfer', accountId: 'wechat', targetAccountId: 'bank', merchant: '本期转账', occurredAt: '2026-08-10T12:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
     await click(container.querySelector<HTMLButtonElement>('[data-insight="savings-rate"]')!)
 
@@ -242,8 +330,7 @@ describe('AnalyticsPage', () => {
       { id: 'wechat-august', kind: 'expense', amount: 10, categoryId: 'food', accountId: 'wechat', merchant: '微信八月', occurredAt: '2026-08-08T12:00:00+08:00', note: '' },
       { id: 'alipay-august', kind: 'expense', amount: 10, categoryId: 'food', accountId: 'alipay', merchant: '支付宝八月', occurredAt: '2026-08-08T12:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
     await click(container.querySelector<HTMLButtonElement>('[data-range="three-months"]')!)
     await changeSelect(container.querySelector<HTMLSelectElement>('[data-analytics-account]')!, 'alipay')
@@ -265,10 +352,10 @@ describe('AnalyticsPage', () => {
       { id: 'august-transport', kind: 'expense', amount: 20, categoryId: 'transport', accountId: 'wechat', merchant: '八月交通', occurredAt: '2026-08-08T12:00:00+08:00', note: '' },
       { id: 'august-income', kind: 'income', amount: 100, categoryId: 'salary', accountId: 'wechat', merchant: '八月收入', occurredAt: '2026-08-09T12:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
     await click(container.querySelector<HTMLButtonElement>('[data-range="three-months"]')!)
+    await settle()
     await click(container.querySelector<HTMLButtonElement>('[data-insight="transport-change"]')!)
     expect(container.querySelector<HTMLSelectElement>('select[name="month"]')?.value).toBe('2026-06')
     expect(container.textContent).toContain('六月交通')
@@ -290,8 +377,7 @@ describe('AnalyticsPage', () => {
       { id: 'july-shopping', kind: 'expense', amount: 100, categoryId: 'shopping', accountId: 'wechat', merchant: '七月购物证据', occurredAt: '2026-07-18T12:00:00+08:00', note: '' },
       { id: 'august-food', kind: 'expense', amount: 50, categoryId: 'food', accountId: 'wechat', merchant: '八月餐饮', occurredAt: '2026-08-18T12:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="analytics" repository={repository} />)
+    const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
     await click(container.querySelector<HTMLButtonElement>('[data-category-comparison="shopping"]')!)
 

@@ -76,6 +76,14 @@ describe('financeReducer', () => {
     expect(next.drawerOpen).toBe(true)
   })
 
+  it('拒绝低版本的加载更多响应，避免回退交易分页状态', () => {
+    const state = { ...initialFinanceState, dataRevision: 5, transactionCursor: 'next', transactionsLoadingMore: true }
+    const page = { items: [], nextCursor: 'older', dataRevision: 4 }
+    const next = financeReducer(state, { type: 'transactions/load-more-succeeded', value: page, transactions: [], dataRevision: 4 })
+
+    expect(next).toBe(state)
+  })
+
   it('删除交易时从交易数组移除并缓存以供恢复', () => {
     const transaction = sampleTransactions[0]
     const deleted = financeReducer(
@@ -123,5 +131,12 @@ describe('financeReducer', () => {
 
     expect(next.categories.slice(0, 2).map(item => item.id)).toEqual(['salary', 'food'])
     expect(next.categories).toHaveLength(initialFinanceState.categories.length)
+  })
+
+  it('mutation revision 只接受更新版本并触发面板刷新代次', () => {
+    const next = financeReducer(initialFinanceState, { type: 'data/revision-updated', dataRevision: 3 })
+    expect(next.dataRevision).toBe(3)
+    expect(next.refreshGeneration).toBe(1)
+    expect(financeReducer(next, { type: 'data/revision-updated', dataRevision: 2 })).toBe(next)
   })
 })

@@ -1,4 +1,6 @@
 export type TransactionKind = 'expense' | 'income' | 'transfer'
+/** Decimal money values are kept as strings at API boundaries. */
+export type Money = string
 export type ViewId = 'overview' | 'transactions' | 'analytics' | 'reports' | 'labels'
 
 export interface Transaction {

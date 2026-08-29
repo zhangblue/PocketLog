@@ -239,7 +239,7 @@ describe('QuickEntryDrawer', () => {
       categoryId: '',
       accountId: 'wechat',
       targetAccountId: 'alipay',
-    }), { keepDrawerOpen: false })
+    }), expect.objectContaining({ keepDrawerOpen: false, idempotencyKey: expect.any(String) }))
   })
 
   it('转账来源和目标账户相同时阻止保存', async () => {

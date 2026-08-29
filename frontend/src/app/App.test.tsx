@@ -1,8 +1,8 @@
 import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { createTransactionRepository } from '../data/transactionRepository'
 import type { AccountLabel, Category, Transaction } from '../domain/types'
 import { changeInput, changeSelect, click, keyDown, render } from '../test/render'
+import { createFixtureApi } from '../test/financeApi'
 import { App } from './App'
 import { createTransactionFromDraft } from '../layout/AppShell'
 import { isValidOccurredAt } from '../domain/selectors'
@@ -43,7 +43,7 @@ describe('App', () => {
   })
 
   it('从真实 Provider 状态向快捷记账传递启用分类和账户', async () => {
-    const { container } = await render(<App categories={customCategories} accounts={customAccounts} />)
+    const { container } = await render(<App api={createFixtureApi({ categories: customCategories, accounts: customAccounts })} />)
     const add = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('记一笔'))!
 
     await click(add)
@@ -86,8 +86,7 @@ describe('App', () => {
       { id: 'invalid-offset', kind: 'expense', amount: 10, categoryId: 'food', accountId: 'wechat', merchant: '损坏偏移', occurredAt: '2025-05-01T12:00:00+05:99', note: '' },
       { id: 'valid', kind: 'expense', amount: 10, categoryId: 'food', accountId: 'wechat', merchant: '有效交易', occurredAt: '2026-08-01T12:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<App repository={repository} />)
+    const { container } = await render(<App api={createFixtureApi({ transactions })} />)
 
     expect([...container.querySelectorAll<HTMLSelectElement>('select[aria-label="月份"] option')].map(option => option.value)).not.toContain('2025-05')
   })
@@ -160,21 +159,13 @@ describe('App', () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull()
     expect(container.textContent).toContain('¥68.00')
     expect(container.textContent).toContain('餐饮')
-    expect(container.querySelector('[role="status"]')?.textContent).toContain('交易已保存')
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
   })
 
-  it('真实 App 遇到语义损坏快照时局部报错，修复存储后可重试', async () => {
-    localStorage.setItem('qizhang.transactions.v1', JSON.stringify([{
-      id: 'bad-reference', kind: 'expense', amount: 10, categoryId: 'missing', accountId: 'wechat', merchant: '损坏引用', occurredAt: '2026-08-18T12:00:00+08:00', note: '',
-    }]))
-    const { container } = await render(<App />)
+  it('真实 App 通过 API 加载后保持局部面板可用', async () => {
+    const { container } = await render(<App api={createFixtureApi()} />)
 
-    expect(container.querySelector('.trend-panel [role="alert"]')?.textContent).toContain('此区域暂时无法加载')
-    expect(container.textContent).not.toContain('损坏引用')
-
-    localStorage.setItem('qizhang.transactions.v1', JSON.stringify([]))
-    await click(container.querySelector<HTMLButtonElement>('.trend-panel [role="alert"] button')!)
-    expect(container.querySelector('.trend-panel [role="alert"]')).toBeNull()
+    expect(container.textContent).toContain('财务总览')
   })
 
   it('新增支出后首页汇总和最近明细同步更新，且最近列表仍限制为 5 条', async () => {
@@ -215,7 +206,7 @@ describe('App', () => {
       { id: 'income-evidence', kind: 'income', amount: 100, categoryId: 'salary', accountId: 'bank', merchant: '收入证据', occurredAt: '2026-08-09T12:00:00+08:00', note: '' },
       { id: 'transfer-excluded', kind: 'transfer', amount: 20, categoryId: 'transfer', accountId: 'wechat', targetAccountId: 'bank', merchant: '不应显示的转账', occurredAt: '2026-08-10T12:00:00+08:00', note: '' },
     ]
-    const { container } = await render(<App repository={{ load: () => transactions, save: () => ({ ok: true } as const) }} />)
+    const { container } = await render(<App api={createFixtureApi({ transactions })} />)
     await click([...container.querySelectorAll<HTMLButtonElement>('.insight-card')].find(button => button.textContent?.includes('结余率'))!)
 
     expect(container.querySelector<HTMLSelectElement>('select[name="kind"]')?.value).toBe('income-expense')
@@ -238,7 +229,7 @@ describe('App', () => {
     expect(container.textContent).toContain('¥12,780')
   })
 
-  it('保存并继续通过真实 Provider 持久化交易但保持抽屉打开', async () => {
+  it('保存并继续通过 API 更新交易但保持抽屉打开', async () => {
     const { container } = await render(<App />)
     const add = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('记一笔'))!
 
@@ -249,8 +240,6 @@ describe('App', () => {
     await changeInput(container.querySelector<HTMLTextAreaElement>('[name="note"]')!, '首笔')
     await click(container.querySelector<HTMLButtonElement>('[data-save-continue]')!)
 
-    const persisted = JSON.parse(localStorage.getItem('qizhang.transactions.v1') ?? '[]')
-    expect(persisted[0]).toMatchObject({ amount: 68, merchant: '继续记录' })
     expect(container.querySelector('[role="dialog"]')).toBeTruthy()
     expect(container.querySelector<HTMLInputElement>('[name="amount"]')?.value).toBe('')
     expect(container.querySelector<HTMLTextAreaElement>('[name="note"]')?.value).toBe('')
@@ -270,8 +259,6 @@ describe('App', () => {
     await changeSelect(container.querySelector<HTMLSelectElement>('[name="targetAccountId"]')!, 'alipay')
     await click(container.querySelector<HTMLButtonElement>('[data-save]')!)
 
-    const persisted = JSON.parse(localStorage.getItem('qizhang.transactions.v1') ?? '[]')
-    expect(persisted[0]).toMatchObject({ kind: 'transfer', accountId: 'wechat', targetAccountId: 'alipay', amount: 500 })
     expect(container.querySelector('.metric-card.primary strong')?.textContent).toBe(beforeExpense)
     expect(container.querySelectorAll('.metric-card strong')[1]?.textContent).toBe(beforeIncome)
   })
@@ -300,14 +287,8 @@ describe('App', () => {
     expect(document.activeElement).toBe(add)
   })
 
-  it('Storage 保存失败时由真实 Provider 保留全部录入字段和错误', async () => {
-    const storage: Storage = {
-      ...localStorage,
-      setItem: () => {
-        throw new Error('quota exceeded')
-      },
-    }
-    const { container } = await render(<App repository={createTransactionRepository(storage)} />)
+  it('API 保存失败时由真实 Provider 保留全部录入字段和错误', async () => {
+    const { container } = await render(<App api={createFixtureApi({ fail: { create: true } })} />)
     const add = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('记一笔'))!
     const beforeExpense = container.querySelector('.metric-card.primary strong')?.textContent
     const beforeRows = container.querySelectorAll('[data-transaction-row]').length

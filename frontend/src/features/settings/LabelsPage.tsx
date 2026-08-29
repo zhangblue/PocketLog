@@ -44,12 +44,13 @@ export function LabelsPage() {
     return () => background.forEach(element => { element.inert = false })
   }, [pending])
 
-  function showResult(result: { ok: true } | { ok: false; message: string }) {
-    if (result.ok) {
+  async function showResult(result: { ok: true } | { ok: false; message: string } | Promise<{ ok: true } | { ok: false; message: string }>) {
+    const resolved = await result
+    if (resolved.ok) {
       setError('')
       return true
     }
-    setError(result.message)
+    setError(resolved.message)
     return false
   }
 
@@ -59,22 +60,22 @@ export function LabelsPage() {
     setError('')
   }
 
-  function saveRename() {
+  async function saveRename() {
     if (!editing) return
     const result = editing.type === 'category'
       ? actions.renameCategory(editing.item.id, editingName)
       : actions.renameAccount(editing.item.id, editingName)
-    if (showResult(result)) setEditing(null)
+    if (await showResult(result)) setEditing(null)
   }
 
-  function submitCategory(event: FormEvent) {
+  async function submitCategory(event: FormEvent) {
     event.preventDefault()
-    if (showResult(actions.createCategory({ name: categoryName, kind: categoryKind }))) setCategoryName('')
+    if (await showResult(actions.createCategory({ name: categoryName, kind: categoryKind }))) setCategoryName('')
   }
 
-  function submitAccount(event: FormEvent) {
+  async function submitAccount(event: FormEvent) {
     event.preventDefault()
-    if (showResult(actions.createAccount(accountName))) setAccountName('')
+    if (await showResult(actions.createAccount(accountName))) setAccountName('')
   }
 
   function moveCategory(id: string, direction: -1 | 1) {
@@ -83,7 +84,7 @@ export function LabelsPage() {
     if (target < 0 || target >= state.categories.length) return
     const orderedIds = state.categories.map(category => category.id)
     ;[orderedIds[index], orderedIds[target]] = [orderedIds[target], orderedIds[index]]
-    showResult(actions.reorderCategories(orderedIds))
+    void showResult(actions.reorderCategories(orderedIds))
   }
 
   function closePending() {
@@ -106,16 +107,17 @@ export function LabelsPage() {
     setDialogError('')
   }
 
-  function confirmPending() {
+  async function confirmPending() {
     if (!pending) return
     const result = pending.type === 'delete'
       ? actions.deleteCategory(pending.category.id)
       : actions.migrateCategory(pending.category.id, migrationTarget)
-    if (result.ok) {
+    const resolved = await result
+    if (resolved.ok) {
       setError('')
       closePending()
     } else {
-      setDialogError(result.message)
+      setDialogError(resolved.message)
     }
   }
 

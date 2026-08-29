@@ -1,8 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
-import { createTransactionRepository, validateTransactionReferences, type SaveResult, type TransactionRepository } from '../data/transactionRepository'
-import { createLabelRepository, type LabelRepository, type LabelSnapshot } from '../data/labelRepository'
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
+import { createFinanceApi, type FinanceApi } from '../api/financeApi'
+import type { BootstrapResponse, TransactionDto } from '../api/types'
 import type { AccountLabel, Category, Transaction, TransactionFilter, ViewId } from '../domain/types'
-import { sampleAccounts, sampleCategories, sampleTransactions } from '../domain/sampleData'
+import { previousMonth } from '../domain/selectors'
+import { sampleTransactions } from '../domain/sampleData'
 import { createInitialFinanceState, financeReducer, type AnalyticsContext, type FinanceState } from './financeReducer'
 
 const UNDO_DURATION = 5000
@@ -13,8 +14,7 @@ export interface FinanceProviderProps {
   initialFilter?: TransactionFilter
   initialCategories?: Category[]
   initialAccounts?: AccountLabel[]
-  repository?: TransactionRepository
-  labelRepository?: LabelRepository
+  api?: FinanceApi
 }
 
 export interface FinanceActions {
@@ -28,127 +28,173 @@ export interface FinanceActions {
   clearDeleted(): void
   changeAnalyticsContext(context: AnalyticsContext): void
   consumeAnalyticsScrollRestore(): void
-  addTransaction(transaction: Transaction, options?: { keepDrawerOpen?: boolean }): SaveResult
-  deleteTransaction(transaction: Transaction): SaveResult
-  restoreTransaction(): SaveResult
-  createCategory(input: { name: string; kind: Category['kind']; emoji?: string; color?: string }): SaveResult
-  renameCategory(id: string, name: string): SaveResult
-  deactivateCategory(id: string): SaveResult
-  reorderCategories(orderedIds: string[]): SaveResult
-  deleteCategory(id: string): SaveResult
-  migrateCategory(fromId: string, toId: string): SaveResult
-  createAccount(name: string): SaveResult
-  renameAccount(id: string, name: string): SaveResult
-  deactivateAccount(id: string): SaveResult
-  retryDataLoad(): void
+  addTransaction(transaction: Transaction, options?: { keepDrawerOpen?: boolean; idempotencyKey?: string }): ActionResult
+  deleteTransaction(transaction: Transaction): ActionResult
+  restoreTransaction(): ActionResult
+  createCategory(input: { name: string; kind: Category['kind']; emoji?: string; color?: string }): ActionResult
+  renameCategory(id: string, name: string): ActionResult
+  deactivateCategory(id: string): ActionResult
+  reorderCategories(orderedIds: string[]): ActionResult
+  deleteCategory(id: string): ActionResult
+  migrateCategory(fromId: string, toId: string): ActionResult
+  createAccount(name: string): ActionResult
+  renameAccount(id: string, name: string): ActionResult
+  deactivateAccount(id: string): ActionResult
+  retryDataLoad(panel?: 'bootstrap' | 'transactions' | 'overview' | 'analytics' | 'report'): void
+  loadMoreTransactions(): Promise<SaveResult>
 }
 
-const labelFailure = (message = '标签保存失败，请重试。'): SaveResult => ({ ok: false, message })
-const transactionFailure = (): SaveResult => ({ ok: false, message: '保存失败，输入内容已保留。' })
-
-function trimmedName(value: string) {
-  return value.trim()
-}
-
-function duplicateName(items: { id: string; name: string }[], name: string, exceptId?: string) {
-  return items.some(item => item.id !== exceptId && item.name.localeCompare(name, 'zh-CN', { sensitivity: 'accent' }) === 0)
-}
-
-function uniqueId(prefix: string, existing: { id: string }[]) {
-  let id = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  while (existing.some(item => item.id === id)) id = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  return id
-}
+type SaveResult = { ok: true } | { ok: false; message: string }
+type ActionResult = SaveResult | Promise<SaveResult>
+interface LabelSnapshot { categories: Category[]; accounts: AccountLabel[] }
 
 const StateContext = createContext<FinanceState | null>(null)
 const ActionsContext = createContext<FinanceActions | null>(null)
 
-function loadTransactions(repository: TransactionRepository) {
-  try {
-    return repository.loadResult?.() ?? { ok: true as const, data: repository.load(), source: 'storage' as const }
-  } catch {
-    return { ok: false as const, data: sampleTransactions, message: '无法读取本地交易数据，已安全回退。' }
+function apiTransaction(value: TransactionDto): Transaction {
+  return {
+    id: value.id,
+    kind: value.kind,
+    amount: Number(value.amount),
+    categoryId: value.categoryId ?? '',
+    accountId: value.accountId,
+    targetAccountId: value.targetAccountId ?? undefined,
+    merchant: value.merchant,
+    occurredAt: value.occurredAt,
+    note: value.note,
   }
 }
 
-function loadLabels(repository: LabelRepository) {
-  try {
-    return repository.loadResult?.() ?? { ok: true as const, data: repository.load(), source: 'storage' as const }
-  } catch {
-    return { ok: false as const, data: { categories: sampleCategories, accounts: sampleAccounts }, message: '无法读取本地标签数据，已安全回退。' }
+function apiLabels(value: BootstrapResponse): LabelSnapshot {
+  return {
+    categories: value.categories.map(item => ({ id: item.id, name: item.name, kind: item.kind, emoji: item.emoji, color: item.color, active: item.active })),
+    accounts: value.accounts.map(item => ({ id: item.id, name: item.name, active: item.active })),
   }
 }
 
-function safeSnapshot(transactions: Transaction[], labels: LabelSnapshot) {
-  return validateTransactionReferences(transactions, labels.categories, labels.accounts)
+function apiCategory(value: { id: string; name: string; kind: 'expense' | 'income'; emoji: string; color: string; active: boolean }): Category {
+  return { id: value.id, name: value.name, kind: value.kind, emoji: value.emoji, color: value.color, active: value.active }
 }
 
-export function FinanceProvider({ children, initialView, initialFilter, initialCategories, initialAccounts, repository, labelRepository }: FinanceProviderProps) {
-  const activeRepository = useMemo(
-    () => repository ?? createTransactionRepository(localStorage),
-    [repository],
-  )
-  const activeLabelRepository = useMemo(
-    () => labelRepository ?? createLabelRepository(localStorage),
-    [labelRepository],
-  )
-  const loadOnMount = !repository && !labelRepository && !initialCategories && !initialAccounts
+function apiAccount(value: { id: string; name: string; active: boolean }): AccountLabel {
+  return { id: value.id, name: value.name, active: value.active }
+}
+
+export function FinanceProvider({ children, initialView, initialFilter, initialCategories, initialAccounts, api: injectedApi }: FinanceProviderProps) {
+  const activeApi = useMemo(() => injectedApi ?? createFinanceApi(), [injectedApi])
   const [state, dispatch] = useReducer(
     financeReducer,
     undefined,
     (): FinanceState => {
       const fresh = createInitialFinanceState()
-      if (loadOnMount) return { ...fresh, view: initialView ?? fresh.view }
-      const transactionResult = loadTransactions(activeRepository)
-      const labelResult = initialCategories || initialAccounts
-        ? { ok: true as const, data: { categories: initialCategories ?? fresh.categories, accounts: initialAccounts ?? fresh.accounts }, source: 'storage' as const }
-        : loadLabels(activeLabelRepository)
-      const labels = labelResult.data
-      const explicitLabelFixtures = Boolean(initialCategories || initialAccounts)
-      const valid = transactionResult.ok && labelResult.ok && (explicitLabelFixtures || safeSnapshot(transactionResult.data, labels))
       const base = {
         ...fresh,
         view: initialView ?? fresh.view,
-        transactions: valid ? transactionResult.data : sampleTransactions,
-        categories: labels.categories,
-        accounts: labels.accounts,
-        dataStatus: valid ? 'ready' as const : 'error' as const,
-        dataError: valid ? undefined : '本地账本数据无法通过完整性校验，已安全回退。',
+        transactions: sampleTransactions,
+        categories: initialCategories ?? fresh.categories,
+        accounts: initialAccounts ?? fresh.accounts,
+        dataStatus: 'loading' as const,
       }
       const withMonth = initialFilter ? financeReducer(base, { type: 'month/changed', month: initialFilter.month }) : base
       return initialFilter ? financeReducer(withMonth, { type: 'filter/changed', filter: initialFilter }) : withMonth
-    },
+  },
   )
   const transactionsRef = useRef(state.transactions)
   const deletedTransactionRef = useRef(state.deletedTransaction)
   const categoriesRef = useRef(state.categories)
   const accountsRef = useRef(state.accounts)
-
-  const applyRepositoryLoad = useCallback(() => {
-    const transactionResult = loadTransactions(activeRepository)
-    const labelResult = loadLabels(activeLabelRepository)
-    if (transactionResult.ok && labelResult.ok && safeSnapshot(transactionResult.data, labelResult.data)) {
-      dispatch({ type: 'data/load-succeeded', transactions: transactionResult.data, categories: labelResult.data.categories, accounts: labelResult.data.accounts })
-      return
-    }
-    dispatch({
-      type: 'data/load-failed',
-      message: !transactionResult.ok ? transactionResult.message : !labelResult.ok ? labelResult.message : '本地账本引用不一致，已安全回退。',
-      transactions: sampleTransactions,
-      categories: sampleCategories,
-      accounts: sampleAccounts,
-    })
-  }, [activeLabelRepository, activeRepository])
+  const sequenceRef = useRef(0)
+  const mountedRef = useRef(true)
+  const revisionRef = useRef(state.dataRevision)
+  const deletionTokenRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
-    if (loadOnMount) applyRepositoryLoad()
-  }, [applyRepositoryLoad, loadOnMount])
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const sequence = ++sequenceRef.current
+    dispatch({ type: 'bootstrap/loading', sequence })
+    void activeApi.bootstrap({ signal: controller.signal }).then(value => {
+      if (!mountedRef.current) return
+      const labels = apiLabels(value)
+      dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, dataRevision: value.dataRevision })
+    }).catch(error => {
+      if (!mountedRef.current || controller.signal.aborted) return
+      dispatch({ type: 'bootstrap/failed', sequence, message: error instanceof Error ? error.message : '无法加载账本，请重试。' })
+    })
+    return () => controller.abort()
+  }, [activeApi, state.filter, state.transactionCursor, state.transactionsLoadingMore])
+
+  useEffect(() => {
+    if (state.bootstrap.status !== 'ready') return undefined
+    const controller = new AbortController()
+    const sequence = ++sequenceRef.current
+    dispatch({ type: 'transactions/request-loading', sequence })
+    void activeApi.listTransactions({ ...state.filter, limit: 100 }, { signal: controller.signal }).then(page => {
+      if (!mountedRef.current) return
+      dispatch({ type: 'transactions/request-succeeded', sequence, value: page, transactions: page.items.map(apiTransaction), dataRevision: page.dataRevision })
+    }).catch(error => {
+      if (!mountedRef.current || controller.signal.aborted) return
+      dispatch({ type: 'transactions/request-failed', sequence, message: error instanceof Error ? error.message : '无法加载交易，请重试。' })
+    })
+    return () => controller.abort()
+  }, [activeApi, state.bootstrap.status, state.month, state.filter, state.refreshGeneration])
+
+  useEffect(() => {
+    if (state.bootstrap.status !== 'ready') return undefined
+    const controller = new AbortController()
+    const sequence = ++sequenceRef.current
+    dispatch({ type: 'analytics/request-loading', sequence })
+    void activeApi.analytics({ start: state.analytics.startDate, end: state.analytics.endDate, accountId: state.analytics.accountId }, { signal: controller.signal }).then(value => {
+      if (mountedRef.current) dispatch({ type: 'analytics/request-succeeded', sequence, value })
+    }).catch(error => {
+      if (!mountedRef.current || controller.signal.aborted) return
+      dispatch({ type: 'analytics/request-failed', sequence, message: error instanceof Error ? error.message : '无法加载分析，请重试。' })
+    })
+    return () => controller.abort()
+  }, [activeApi, state.analytics.startDate, state.analytics.endDate, state.analytics.accountId, state.bootstrap.status, state.refreshGeneration])
+
+  useEffect(() => {
+    if (state.bootstrap.status !== 'ready') return undefined
+    const controller = new AbortController()
+    const sequence = ++sequenceRef.current
+    dispatch({ type: 'report/request-loading', sequence })
+    void activeApi.monthlyReport({ month: state.month }, { signal: controller.signal }).then(value => {
+      if (mountedRef.current) dispatch({ type: 'report/request-succeeded', sequence, value })
+    }).catch(error => {
+      if (!mountedRef.current || controller.signal.aborted) return
+      dispatch({ type: 'report/request-failed', sequence, message: error instanceof Error ? error.message : '无法加载月报，请重试。' })
+    })
+    return () => controller.abort()
+  }, [activeApi, state.month, state.bootstrap.status, state.refreshGeneration])
+
+  useEffect(() => {
+    if (state.bootstrap.status !== 'ready') return undefined
+    const controller = new AbortController()
+    const sequence = ++sequenceRef.current
+    dispatch({ type: 'overview/request-loading', sequence })
+    void Promise.all([
+      activeApi.overview({ month: state.month }, { signal: controller.signal }),
+      activeApi.overview({ month: previousMonth(state.month) }, { signal: controller.signal }),
+    ]).then(([value, previous]) => {
+      const enriched = { ...value, previousSummary: previous.data.summary }
+      if (mountedRef.current) dispatch({ type: 'overview/request-succeeded', sequence, value: enriched })
+    }).catch(error => {
+      if (!mountedRef.current || controller.signal.aborted) return
+      dispatch({ type: 'overview/request-failed', sequence, message: error instanceof Error ? error.message : '无法加载总览，请重试。' })
+    })
+    return () => controller.abort()
+  }, [activeApi, state.bootstrap.status, state.month, state.refreshGeneration])
 
   useEffect(() => {
     transactionsRef.current = state.transactions
     deletedTransactionRef.current = state.deletedTransaction
     categoriesRef.current = state.categories
     accountsRef.current = state.accounts
+    revisionRef.current = state.dataRevision
   }, [state.transactions, state.deletedTransaction, state.categories, state.accounts])
 
   useEffect(() => {
@@ -168,7 +214,27 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
     return () => window.clearTimeout(timer)
   }, [state.deletedTransaction, state.deletedTransactionExpiresAt])
 
-  const actions = useMemo<FinanceActions>(() => ({
+  const actions = useMemo<FinanceActions>(() => {
+    const recoverRevisionConflict = (error: unknown) => {
+      if ((error as { code?: unknown })?.code !== 'revision_conflict') return
+      const sequence = ++sequenceRef.current
+      dispatch({ type: 'bootstrap/loading', sequence })
+      void activeApi.bootstrap().then(value => {
+        if (!mountedRef.current) return
+        const labels = apiLabels(value)
+        revisionRef.current = value.dataRevision
+        categoriesRef.current = labels.categories
+        accountsRef.current = labels.accounts
+        dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, dataRevision: value.dataRevision })
+      }).catch(recoveryError => {
+        if (mountedRef.current) dispatch({ type: 'bootstrap/failed', sequence, message: recoveryError instanceof Error ? recoveryError.message : '无法刷新账本，请重试。' })
+      })
+    }
+    const mutationFailure = (error: unknown, fallback: string): SaveResult => {
+      recoverRevisionConflict(error)
+      return { ok: false, message: error instanceof Error ? error.message : fallback }
+    }
+    return ({
     changeView: view => dispatch({ type: 'view/changed', view }),
     changeMonth: month => dispatch({ type: 'month/changed', month }),
     openDrawer: () => dispatch({ type: 'drawer/opened' }),
@@ -182,178 +248,221 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
       deletedTransactionRef.current = undefined
       dispatch({ type: 'transaction/delete-cleared' })
     },
-    addTransaction: (transaction, options) => {
-      const nextTransactions = [transaction, ...transactionsRef.current]
-      if (!validateTransactionReferences(nextTransactions, categoriesRef.current, accountsRef.current)) return transactionFailure()
-      const result = activeRepository.save(nextTransactions)
-      if (result.ok) {
-        transactionsRef.current = nextTransactions
-        dispatch({ type: 'transaction/added', transaction, keepDrawerOpen: options?.keepDrawerOpen })
+    loadMoreTransactions: async () => {
+      if (!state.transactionCursor || state.transactionsLoadingMore) return { ok: true }
+      dispatch({ type: 'transactions/load-more-started' })
+      try {
+        const page = await activeApi.listTransactions({ ...state.filter, cursor: state.transactionCursor, limit: 100 })
+        if (!mountedRef.current) return { ok: true }
+        const existing = new Set(transactionsRef.current.map(item => item.id))
+        const appended = page.items.map(apiTransaction).filter(item => !existing.has(item.id))
+        transactionsRef.current = [...transactionsRef.current, ...appended]
+        revisionRef.current = page.dataRevision
+        dispatch({ type: 'transactions/load-more-succeeded', value: page, transactions: transactionsRef.current, dataRevision: page.dataRevision })
+        return { ok: true }
+      } catch (error) {
+        dispatch({ type: 'transactions/load-more-failed', message: error instanceof Error ? error.message : '无法加载更多交易，请重试。' })
+        return { ok: false, message: error instanceof Error ? error.message : '无法加载更多交易，请重试。' }
       }
-      return result
+    },
+    addTransaction: (transaction, options) => {
+      {
+        const idempotencyKey = options?.idempotencyKey ?? `entry-${transaction.id}`
+        return activeApi.createTransaction({
+          kind: transaction.kind,
+          amount: transaction.amount.toFixed(2),
+          merchant: transaction.merchant,
+          categoryId: transaction.categoryId || null,
+          accountId: transaction.accountId,
+          targetAccountId: transaction.targetAccountId ?? null,
+          occurredAt: transaction.occurredAt,
+          note: transaction.note,
+        }, { revision: revisionRef.current, idempotencyKey }).then(result => {
+          if (!mountedRef.current) return { ok: true as const }
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          const saved = apiTransaction(result.data)
+          transactionsRef.current = [saved, ...transactionsRef.current]
+          dispatch({ type: 'transaction/added', transaction: saved, keepDrawerOpen: options?.keepDrawerOpen })
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '保存失败，输入内容已保留。'))
+      }
     },
     deleteTransaction: transaction => {
-      const nextTransactions = transactionsRef.current.filter(item => item.id !== transaction.id)
-      const result = activeRepository.save(nextTransactions)
-      if (result.ok) {
-        transactionsRef.current = nextTransactions
-        deletedTransactionRef.current = transaction
-        dispatch({ type: 'transaction/deleted', transaction, expiresAt: Date.now() + UNDO_DURATION })
+      {
+        return activeApi.deleteTransaction(transaction.id, revisionRef.current).then(result => {
+          if (!mountedRef.current) return { ok: true as const }
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          deletionTokenRef.current = result.data.deletionToken
+          const until = Date.parse(result.data.undoUntil)
+          deletedTransactionRef.current = transaction
+          transactionsRef.current = transactionsRef.current.filter(item => item.id !== transaction.id)
+          dispatch({ type: 'transaction/deleted', transaction, expiresAt: Number.isFinite(until) ? until : Date.now() + UNDO_DURATION })
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '删除失败，请重试。'))
       }
-      return result
     },
     restoreTransaction: () => {
-      const deletedTransaction = deletedTransactionRef.current
-      if (!deletedTransaction) return { ok: true }
-
-      const nextTransactions = [deletedTransaction, ...transactionsRef.current]
-      const result = activeRepository.save(nextTransactions)
-      if (result.ok) {
-        transactionsRef.current = nextTransactions
-        deletedTransactionRef.current = undefined
-        dispatch({ type: 'transaction/restored' })
-      } else {
-        dispatch({ type: 'transaction/delete-retry-windowed', expiresAt: Date.now() + UNDO_DURATION })
+      {
+        const deleted = deletedTransactionRef.current
+        const token = deletionTokenRef.current
+        if (!deleted || !token) return { ok: true as const }
+        return activeApi.restoreTransaction(deleted.id, token, revisionRef.current).then(result => {
+          if (!mountedRef.current) return { ok: true as const }
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          const restored = apiTransaction(result.data)
+          transactionsRef.current = [restored, ...transactionsRef.current]
+          deletedTransactionRef.current = undefined
+          deletionTokenRef.current = undefined
+          dispatch({ type: 'transaction/restored' })
+          return { ok: true as const }
+        }).catch(error => {
+          // A failed restore must leave the deletion and a fresh, bounded undo
+          // window available for retry; the failed mutation never changes data.
+          if (mountedRef.current && deletedTransactionRef.current) {
+            dispatch({ type: 'transaction/delete-retry-windowed', expiresAt: Date.now() + UNDO_DURATION })
+          }
+          return mutationFailure(error, '恢复失败，请重试。')
+        })
       }
-      return result
     },
     createCategory: input => {
-      const name = trimmedName(input.name)
-      if (!name) return labelFailure('请输入分类名称。')
-      if (duplicateName(categoriesRef.current, name)) return labelFailure('分类名称已存在。')
-      const category: Category = {
-        id: uniqueId('category', categoriesRef.current),
-        name,
-        kind: input.kind,
-        emoji: input.emoji?.trim() || '🏷️',
-        color: input.color?.trim() || '#4f8a75',
-        active: true,
+      {
+        return activeApi.createCategory({ name: input.name.trim(), kind: input.kind, emoji: input.emoji?.trim() || '🏷️', color: input.color?.trim() || '#4f8a75', semanticKey: null, sortOrder: categoriesRef.current.length }, revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          const category = apiCategory(result.data as never)
+          categoriesRef.current = [...categoriesRef.current, category]
+          dispatch({ type: 'category/created', category })
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
       }
-      const nextCategories = [...categoriesRef.current, category]
-      const result = activeLabelRepository.save({ categories: nextCategories, accounts: accountsRef.current })
-      if (result.ok) {
-        categoriesRef.current = nextCategories
-        dispatch({ type: 'category/created', category })
-      }
-      return result
     },
     renameCategory: (id, rawName) => {
-      const name = trimmedName(rawName)
-      const category = categoriesRef.current.find(item => item.id === id)
-      if (!category) return labelFailure('分类不存在。')
-      if (!name) return labelFailure('请输入分类名称。')
-      if (duplicateName(categoriesRef.current, name, id)) return labelFailure('分类名称已存在。')
-      const nextCategories = categoriesRef.current.map(item => item.id === id ? { ...item, name } : item)
-      const result = activeLabelRepository.save({ categories: nextCategories, accounts: accountsRef.current })
-      if (result.ok) {
-        categoriesRef.current = nextCategories
-        dispatch({ type: 'category/renamed', id, name })
+      {
+        return activeApi.patchCategory(id, { name: rawName.trim() }, revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          dispatch({ type: 'category/renamed', id, name: result.data.name })
+          categoriesRef.current = categoriesRef.current.map(item => item.id === id ? { ...item, name: result.data.name } : item)
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
       }
-      return result
     },
     deactivateCategory: id => {
-      const category = categoriesRef.current.find(item => item.id === id)
-      if (!category) return labelFailure('分类不存在。')
-      if (!category.active) return { ok: true }
-      if (categoriesRef.current.filter(item => item.kind === category.kind && item.active).length <= 1) return labelFailure('请至少保留一个启用分类。')
-      const nextCategories = categoriesRef.current.map(item => item.id === id ? { ...item, active: false } : item)
-      const result = activeLabelRepository.save({ categories: nextCategories, accounts: accountsRef.current })
-      if (result.ok) {
-        categoriesRef.current = nextCategories
-        dispatch({ type: 'category/deactivated', id })
+      {
+        return activeApi.deactivateCategory(id, revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          dispatch({ type: 'category/deactivated', id })
+          categoriesRef.current = categoriesRef.current.map(item => item.id === id ? { ...item, active: false } : item)
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
       }
-      return result
     },
     reorderCategories: orderedIds => {
-      const knownIds = new Set(categoriesRef.current.map(item => item.id))
-      if (orderedIds.length !== categoriesRef.current.length || new Set(orderedIds).size !== orderedIds.length || orderedIds.some(id => !knownIds.has(id))) return labelFailure('分类排序无效。')
-      const nextCategories = orderedIds.map(id => categoriesRef.current.find(item => item.id === id)!)
-      const result = activeLabelRepository.save({ categories: nextCategories, accounts: accountsRef.current })
-      if (result.ok) {
-        categoriesRef.current = nextCategories
-        dispatch({ type: 'category/reordered', orderedIds })
-      }
-      return result
+      return activeApi.reorderCategories(orderedIds, revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          dispatch({ type: 'category/reordered', orderedIds: result.data.map(item => item.id) })
+          const byId = new Map(categoriesRef.current.map(item => [item.id, item]))
+          categoriesRef.current = result.data.map(item => byId.get(item.id) ?? apiCategory(item as never)).filter((item): item is Category => Boolean(item))
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
     },
     deleteCategory: id => {
-      const category = categoriesRef.current.find(item => item.id === id)
-      if (!category) return labelFailure('分类不存在。')
-      if (transactionsRef.current.some(transaction => transaction.categoryId === id)) return labelFailure('该分类已有历史记录，请迁移后删除。')
-      if (category.active && categoriesRef.current.filter(item => item.kind === category.kind && item.active).length <= 1) return labelFailure('请至少保留一个启用分类。')
-      const nextCategories = categoriesRef.current.filter(item => item.id !== id)
-      const result = activeLabelRepository.save({ categories: nextCategories, accounts: accountsRef.current })
-      if (result.ok) {
-        categoriesRef.current = nextCategories
-        dispatch({ type: 'category/deleted', id })
-      }
-      return result
+      return activeApi.deleteCategory(id, revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          dispatch({ type: 'category/deleted', id })
+          categoriesRef.current = categoriesRef.current.filter(item => item.id !== id)
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
     },
     migrateCategory: (fromId, toId) => {
-      const source = categoriesRef.current.find(item => item.id === fromId)
-      const target = categoriesRef.current.find(item => item.id === toId)
-      if (!source || !target) return labelFailure('请选择有效分类。')
-      if (source.id === target.id || source.kind !== target.kind || !target.active) return labelFailure('请选择同类型的启用分类。')
-      const previousTransactions = transactionsRef.current
-      const nextTransactions = previousTransactions.map(transaction => transaction.categoryId === fromId ? { ...transaction, categoryId: toId } : transaction)
-      const nextCategories = categoriesRef.current.filter(item => item.id !== fromId)
-      const transactionResult = activeRepository.save(nextTransactions)
-      if (!transactionResult.ok) return transactionResult
-      const labelResult = activeLabelRepository.save({ categories: nextCategories, accounts: accountsRef.current })
-      if (!labelResult.ok) {
-        const rollback = activeRepository.save(previousTransactions)
-        return rollback.ok
-          ? labelFailure('分类保存失败，交易已恢复，请重试。')
-          : labelFailure('分类保存失败，恢复交易也失败。请勿关闭页面，并在存储恢复后重试。')
-      }
-      transactionsRef.current = nextTransactions
-      categoriesRef.current = nextCategories
-      dispatch({ type: 'category/migrated', fromId, toId })
-      return { ok: true }
+      return activeApi.migrateCategory(fromId, toId, revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          dispatch({ type: 'category/migrated', fromId, toId })
+          transactionsRef.current = transactionsRef.current.map(item => item.categoryId === fromId ? { ...item, categoryId: toId } : item)
+          categoriesRef.current = categoriesRef.current.filter(item => item.id !== fromId)
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
     },
     createAccount: rawName => {
-      const name = trimmedName(rawName)
-      if (!name) return labelFailure('请输入账户名称。')
-      if (duplicateName(accountsRef.current, name)) return labelFailure('账户名称已存在。')
-      const account: AccountLabel = { id: uniqueId('account', accountsRef.current), name, active: true }
-      const nextAccounts = [...accountsRef.current, account]
-      const result = activeLabelRepository.save({ categories: categoriesRef.current, accounts: nextAccounts })
-      if (result.ok) {
-        accountsRef.current = nextAccounts
-        dispatch({ type: 'account/created', account })
-      }
-      return result
+      return activeApi.createAccount(rawName.trim(), revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          dispatch({ type: 'account/created', account: apiAccount(result.data) })
+          accountsRef.current = [...accountsRef.current, apiAccount(result.data)]
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
     },
     renameAccount: (id, rawName) => {
-      const name = trimmedName(rawName)
-      if (!accountsRef.current.some(item => item.id === id)) return labelFailure('账户不存在。')
-      if (!name) return labelFailure('请输入账户名称。')
-      if (duplicateName(accountsRef.current, name, id)) return labelFailure('账户名称已存在。')
-      const nextAccounts = accountsRef.current.map(item => item.id === id ? { ...item, name } : item)
-      const result = activeLabelRepository.save({ categories: categoriesRef.current, accounts: nextAccounts })
-      if (result.ok) {
-        accountsRef.current = nextAccounts
-        dispatch({ type: 'account/renamed', id, name })
-      }
-      return result
+      return activeApi.patchAccount(id, { name: rawName.trim() }, revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          dispatch({ type: 'account/renamed', id, name: result.data.name })
+          accountsRef.current = accountsRef.current.map(item => item.id === id ? { ...item, name: result.data.name } : item)
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
     },
     deactivateAccount: id => {
-      const account = accountsRef.current.find(item => item.id === id)
-      if (!account) return labelFailure('账户不存在。')
-      if (!account.active) return { ok: true }
-      if (accountsRef.current.filter(item => item.active).length <= 1) return labelFailure('请至少保留一个启用账户。')
-      const nextAccounts = accountsRef.current.map(item => item.id === id ? { ...item, active: false } : item)
-      const result = activeLabelRepository.save({ categories: categoriesRef.current, accounts: nextAccounts })
-      if (result.ok) {
-        accountsRef.current = nextAccounts
-        dispatch({ type: 'account/deactivated', id })
-      }
-      return result
+      return activeApi.deactivateAccount(id, revisionRef.current).then(result => {
+          revisionRef.current = result.dataRevision
+          dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+          dispatch({ type: 'account/deactivated', id })
+          accountsRef.current = accountsRef.current.map(item => item.id === id ? { ...item, active: false } : item)
+          return { ok: true as const }
+        }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
     },
-    retryDataLoad: () => {
-      dispatch({ type: 'data/load-started' })
-      applyRepositoryLoad()
+    retryDataLoad: (panel = 'bootstrap') => {
+        const sequence = ++sequenceRef.current
+        if (panel === 'transactions') {
+          dispatch({ type: 'transactions/request-loading', sequence })
+          void activeApi.listTransactions({ ...state.filter, limit: 100 }).then(page => {
+            if (!mountedRef.current) return
+            revisionRef.current = page.dataRevision
+            dispatch({ type: 'transactions/request-succeeded', sequence, value: page, transactions: page.items.map(apiTransaction), dataRevision: page.dataRevision })
+          }).catch(error => { if (mountedRef.current) dispatch({ type: 'transactions/request-failed', sequence, message: error instanceof Error ? error.message : '无法加载交易，请重试。' }) })
+          return
+        }
+        if (panel === 'overview' || panel === 'analytics' || panel === 'report') {
+          if (panel === 'overview') dispatch({ type: 'overview/request-loading', sequence })
+          if (panel === 'analytics') dispatch({ type: 'analytics/request-loading', sequence })
+          if (panel === 'report') dispatch({ type: 'report/request-loading', sequence })
+          const call = panel === 'overview' ? activeApi.overview({ month: state.month }) : panel === 'analytics' ? activeApi.analytics({ start: state.analytics.startDate, end: state.analytics.endDate, accountId: state.analytics.accountId }) : activeApi.monthlyReport({ month: state.month })
+          void call.then(value => {
+            if (!mountedRef.current) return
+            if (panel === 'overview') dispatch({ type: 'overview/request-succeeded', sequence, value: value as never })
+            if (panel === 'analytics') dispatch({ type: 'analytics/request-succeeded', sequence, value: value as never })
+            if (panel === 'report') dispatch({ type: 'report/request-succeeded', sequence, value: value as never })
+          }).catch(error => {
+            if (!mountedRef.current) return
+            const message = error instanceof Error ? error.message : '面板加载失败，请重试。'
+            if (panel === 'overview') dispatch({ type: 'overview/request-failed', sequence, message })
+            if (panel === 'analytics') dispatch({ type: 'analytics/request-failed', sequence, message })
+            if (panel === 'report') dispatch({ type: 'report/request-failed', sequence, message })
+          })
+          return
+        }
+        dispatch({ type: 'bootstrap/loading', sequence })
+        void activeApi.bootstrap().then(value => {
+          if (!mountedRef.current) return
+          const labels = apiLabels(value)
+          revisionRef.current = value.dataRevision
+          categoriesRef.current = labels.categories
+          accountsRef.current = labels.accounts
+          dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, dataRevision: value.dataRevision })
+        }).catch(error => {
+          if (mountedRef.current) dispatch({ type: 'bootstrap/failed', sequence, message: error instanceof Error ? error.message : '无法加载账本，请重试。' })
+        })
+        return
     },
-  }), [activeRepository, activeLabelRepository, applyRepositoryLoad])
+    })
+  }, [activeApi, state.filter, state.transactionCursor, state.transactionsLoadingMore])
 
   return (
     <StateContext.Provider value={state}>

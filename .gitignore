@@ -3,5 +3,7 @@
 node_modules/
 dist/
 coverage/
+backend/target/
+release/
 *.log
 .DS_Store

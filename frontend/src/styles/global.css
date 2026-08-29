@@ -1174,9 +1174,45 @@ textarea:focus-visible {
   border-bottom: 1px solid #e7e9e2;
 }
 
+.analytics-trend-grid {
+  stroke: #e7e9e2;
+  stroke-width: 1;
+}
+
+.analytics-trend-axis-label,
+.analytics-trend-y-axis-label {
+  fill: var(--color-muted);
+  font-size: 10px;
+}
+
 .analytics-trend-bar {
   fill: var(--color-green);
   opacity: .82;
+  cursor: pointer;
+}
+
+.analytics-trend-bar:hover,
+.analytics-trend-bar:focus {
+  opacity: 1;
+}
+
+.analytics-trend-hit-target {
+  cursor: pointer;
+}
+
+.analytics-trend-hit-target:focus-visible {
+  stroke: var(--color-ink);
+  stroke-width: 2px;
+}
+
+.analytics-trend-tooltip rect {
+  fill: var(--color-ink);
+}
+
+.analytics-trend-tooltip text {
+  fill: #f7faf7;
+  font-size: 10px;
+  font-weight: 650;
 }
 
 .analytics-trend-panel figcaption {
@@ -1184,24 +1220,6 @@ textarea:focus-visible {
   color: var(--color-muted);
   font-size: 10px;
   line-height: 1.5;
-}
-
-.analytics-trend-buttons {
-  display: flex;
-  gap: 7px;
-  margin-top: 12px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-
-.analytics-trend-buttons button {
-  flex: 0 0 auto;
-  padding: 7px 9px;
-  border: 1px solid #dce5df;
-  border-radius: 8px;
-  background: #f7faf7;
-  color: #456057;
-  font-size: 11px;
 }
 
 .analytics-insight-empty {

@@ -1,5 +1,6 @@
 import { afterEach, vi } from 'vitest'
 import { cleanupRenderedRoots } from './render'
+import { createFixtureFetch } from './financeApi'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -26,12 +27,14 @@ function resetScrollEnvironment() {
 }
 
 resetScrollEnvironment()
+vi.stubGlobal('fetch', createFixtureFetch())
 
 afterEach(async () => {
   await cleanupRenderedRoots()
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  vi.stubGlobal('fetch', createFixtureFetch())
   vi.unstubAllEnvs()
   resetScrollEnvironment()
   document.body.replaceChildren()

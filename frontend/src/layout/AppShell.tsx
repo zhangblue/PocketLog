@@ -2,7 +2,7 @@ import { useRef, type ReactNode } from 'react'
 import { useFinance } from '../app/FinanceProvider'
 import type { Transaction, ViewId } from '../domain/types'
 import { QuickEntryDrawer, isValidOccurredAt, type TransactionDraft } from '../features/entry/QuickEntryDrawer'
-import { isValidOccurredAt as isValidIsoTimestamp, monthKey } from '../domain/selectors'
+import { isValidOccurredAt as isValidIsoTimestamp } from '../domain/selectors'
 
 const navItems: readonly { view: ViewId; label: string; symbol: string }[] = [
   { view: 'overview', label: '总览', symbol: '◈' },
@@ -57,9 +57,9 @@ function TemporaryPage({ view }: { view: ViewId }) {
 export function AppShell({ children, transactionsPage, analyticsPage, reportsPage, labelsPage }: { children: ReactNode; transactionsPage?: ReactNode; analyticsPage?: ReactNode; reportsPage?: ReactNode; labelsPage?: ReactNode }) {
   const { state, actions } = useFinance()
   const addButtonRef = useRef<HTMLButtonElement>(null)
-  const months = [...new Set([state.month, ...state.transactions.map(item => monthKey(item.occurredAt)).filter(Boolean)])].sort().reverse()
+  const months = [...new Set([state.month, ...(state.bootstrap.value?.months ?? [])])].sort().reverse()
 
-  function saveDraft(draft: TransactionDraft, options?: { keepDrawerOpen?: boolean }) {
+  function saveDraft(draft: TransactionDraft, options?: { keepDrawerOpen?: boolean; idempotencyKey?: string }) {
     const transaction = createTransactionFromDraft(draft, `tx-${Date.now()}-${Math.random().toString(36).slice(2)}`)
     if (!transaction) return { ok: false, message: '请输入有效日期' }
 

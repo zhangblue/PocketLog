@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from '../../app/App'
+import { createFixtureApi } from '../../test/financeApi'
 import { FinanceProvider } from '../../app/FinanceProvider'
 import { sampleTransactions } from '../../domain/sampleData'
 import { changeSelect, click, render } from '../../test/render'
@@ -22,8 +23,7 @@ describe('MonthlyReportPage', () => {
   })
 
   it('空月报不编造亮点或消费故事', async () => {
-    const repository = { load: () => [], save: () => ({ ok: true } as const) }
-    const { container } = await render(<App initialView="reports" repository={repository} />)
+    const { container } = await render(<App initialView="reports" api={createFixtureApi({ transactions: [] })} />)
 
     expect(container.textContent).toContain('本月还没有可回顾的收支记录')
     expect(container.textContent).toContain('记下第一笔收支后，这里会生成月度回顾。')
@@ -31,7 +31,7 @@ describe('MonthlyReportPage', () => {
   })
 
   it('从真实 App 导航到报告后，切换月份会立即刷新报告数据', async () => {
-    const { container } = await render(<App repository={{ load: () => sampleTransactions, save: () => ({ ok: true } as const) }} />)
+    const { container } = await render(<App api={createFixtureApi({ transactions: sampleTransactions })} />)
 
     await click(container.querySelector<HTMLButtonElement>('[aria-label="月度报告"]')!)
     expect(container.textContent).toContain('2026 年 8 月月度报告')

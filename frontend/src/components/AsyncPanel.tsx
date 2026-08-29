@@ -12,6 +12,7 @@ type AsyncPanelBaseProps = {
 export type AsyncPanelProps = AsyncPanelBaseProps & (
   | { status: 'loading' | 'ready'; onRetry?: never }
   | { status: 'error'; onRetry: () => void }
+  | { status: AsyncPanelStatus; onRetry: () => void }
 )
 
 export function AsyncPanel({ title, status, children, onRetry, className, headingLevel = 3 }: AsyncPanelProps) {

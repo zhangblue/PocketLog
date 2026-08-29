@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { flushSync } from 'react-dom'
 import { sampleAccounts, sampleCategories } from '../../domain/sampleData'
 import type { AccountLabel, Category } from '../../domain/types'
 import { isValidCalendarDate } from '../../domain/selectors'
@@ -18,7 +19,7 @@ export interface TransactionDraft {
 export interface QuickEntryDrawerProps {
   open: boolean
   onClose(): void
-  onSave(draft: TransactionDraft, options?: { keepDrawerOpen?: boolean }): { ok: true } | { ok: false; message: string }
+  onSave(draft: TransactionDraft, options?: { keepDrawerOpen?: boolean; idempotencyKey?: string }): { ok: true } | { ok: false; message: string } | Promise<{ ok: true } | { ok: false; message: string }>
   categories?: Category[]
   accounts?: AccountLabel[]
 }
@@ -51,6 +52,8 @@ function emptyDraft(): TransactionDraft {
 
 export function QuickEntryDrawer({ open, onClose, onSave, categories = sampleCategories, accounts = sampleAccounts }: QuickEntryDrawerProps) {
   const amountRef = useRef<HTMLInputElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const continueRef = useRef<HTMLButtonElement>(null)
   const dateRef = useRef<HTMLInputElement>(null)
   const timeRef = useRef<HTMLInputElement>(null)
   const categoryRef = useRef<HTMLSelectElement>(null)
@@ -58,6 +61,9 @@ export function QuickEntryDrawer({ open, onClose, onSave, categories = sampleCat
   const targetAccountRef = useRef<HTMLSelectElement>(null)
   const [draft, setDraft] = useState(emptyDraft)
   const [error, setError] = useState('')
+  const [savedNotice, setSavedNotice] = useState('')
+  const [confirmingClose, setConfirmingClose] = useState(false)
+  const idempotencyKeyRef = useRef<string | undefined>(undefined)
   const activeCategories = useMemo(() => categories.filter(category => category.active), [categories])
   const activeAccounts = useMemo(() => accounts.filter(account => account.active), [accounts])
   const amountError = error === '请输入大于 0 的金额'
@@ -66,9 +72,16 @@ export function QuickEntryDrawer({ open, onClose, onSave, categories = sampleCat
   const categoryError = error === '请选择有效分类'
   const accountError = error === '请至少保留一个启用账户' || error === '请选择有效账户'
   const transferAccountError = error === '转出与转入账户不能相同' || error === '请选择有效的转入账户'
+  const dirty = draft.amount !== '' || draft.merchant !== '' || draft.note !== ''
+
+  useEffect(() => {
+    if (confirmingClose) continueRef.current?.focus()
+  }, [confirmingClose])
 
   useEffect(() => {
     if (open) amountRef.current?.focus()
+    if (open && !idempotencyKeyRef.current) idempotencyKeyRef.current = `entry-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    if (!open) idempotencyKeyRef.current = undefined
   }, [open])
 
   useEffect(() => {
@@ -94,7 +107,7 @@ export function QuickEntryDrawer({ open, onClose, onSave, categories = sampleCat
 
   if (!open) return null
 
-  function save(continueSaving: boolean) {
+  async function save(continueSaving: boolean) {
     const parsedAmount = Number(draft.amount)
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       setError('请输入大于 0 的金额')
@@ -137,12 +150,14 @@ export function QuickEntryDrawer({ open, onClose, onSave, categories = sampleCat
       return
     }
 
-    const result = onSave(draft, { keepDrawerOpen: continueSaving })
+    const result = await onSave(draft, { keepDrawerOpen: continueSaving, idempotencyKey: idempotencyKeyRef.current })
     if (!result.ok) {
       setError(result.message)
       return
     }
     setError('')
+    setSavedNotice('交易已保存')
+    idempotencyKeyRef.current = `entry-${Date.now()}-${Math.random().toString(36).slice(2)}`
     if (continueSaving) {
       setDraft(current => ({ ...current, amount: '', note: '' }))
       return
@@ -168,7 +183,7 @@ export function QuickEntryDrawer({ open, onClose, onSave, categories = sampleCat
   function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.key === 'Escape') {
       event.preventDefault()
-      onClose()
+      requestClose()
       return
     }
     if (event.key === 'Tab') {
@@ -180,6 +195,21 @@ export function QuickEntryDrawer({ open, onClose, onSave, categories = sampleCat
         event.preventDefault()
         const target = shouldWrapBackward ? lastFocusable : focusable[0]
         target?.focus()
+      }
+    }
+  }
+
+  function requestClose() {
+    if (dirty) flushSync(() => setConfirmingClose(true))
+    else onClose()
+  }
+
+  function handleConfirmationKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key === 'Escape') { event.preventDefault(); setConfirmingClose(false); cancelRef.current?.focus(); return }
+    if (event.key === 'Tab') {
+      const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled])'))
+      if (buttons.length && (event.shiftKey ? document.activeElement === buttons[0] : document.activeElement === buttons[buttons.length - 1])) {
+        event.preventDefault(); (event.shiftKey ? buttons[buttons.length - 1] : buttons[0]).focus()
       }
     }
   }
@@ -299,12 +329,20 @@ export function QuickEntryDrawer({ open, onClose, onSave, categories = sampleCat
           />
         </label>
         {error ? <p id="entry-error" role="alert">{error}</p> : null}
+        {savedNotice ? <p role="status">{savedNotice}</p> : null}
         <div className="entry-actions">
-          <button type="button" className="entry-close" onClick={onClose}>取消</button>
+          <button ref={cancelRef} type="button" className="entry-close" onClick={requestClose}>取消</button>
           <button type="button" className="entry-continue" data-save-continue onClick={() => save(true)}>保存并继续</button>
           <button type="submit" className="entry-save" data-save>保存</button>
         </div>
       </form>
+      {confirmingClose ? (
+        <div role="alertdialog" aria-modal="true" aria-label="确认关闭" onKeyDown={handleConfirmationKeyDown}>
+          <p>有未保存的内容，是否放弃？</p>
+          <button ref={continueRef} type="button" onClick={() => { setConfirmingClose(false); cancelRef.current?.focus() }}>继续编辑</button>
+          <button type="button" onClick={() => { setConfirmingClose(false); onClose() }}>放弃</button>
+        </div>
+      ) : null}
       </section>
     </div>
   )

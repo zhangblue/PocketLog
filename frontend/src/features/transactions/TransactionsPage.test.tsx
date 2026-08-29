@@ -1,8 +1,8 @@
 import { act } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { FinanceProvider } from '../../app/FinanceProvider'
-import { createTransactionRepository } from '../../data/transactionRepository'
 import { changeSelect, click, keyDown, render } from '../../test/render'
+import { createFixtureApi } from '../../test/financeApi'
 import { TransactionsPage } from './TransactionsPage'
 
 describe('TransactionsPage', () => {
@@ -48,11 +48,7 @@ describe('TransactionsPage', () => {
   })
 
   it('明细月份选项不从 offset 分钟越界的时间戳派生', async () => {
-    const repository = {
-      load: () => [{ id: 'invalid-offset', kind: 'expense' as const, amount: 10, categoryId: 'food', accountId: 'wechat', merchant: '损坏偏移', occurredAt: '2025-05-01T12:00:00+05:99', note: '' }],
-      save: () => ({ ok: true } as const),
-    }
-    const { container } = await render(<FinanceProvider repository={repository}><TransactionsPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ transactions: [{ id: 'invalid-offset', kind: 'expense', amount: 10, categoryId: 'food', accountId: 'wechat', merchant: '损坏偏移', occurredAt: '2025-05-01T12:00:00+05:99', note: '' }] })}><TransactionsPage /></FinanceProvider>)
 
     expect([...container.querySelectorAll<HTMLSelectElement>('select[name="month"] option')].map(option => option.value)).not.toContain('2025-05')
   })
@@ -108,9 +104,9 @@ describe('TransactionsPage', () => {
   })
 
   it('转账交易在账户列显示来源和去向账户', async () => {
-    localStorage.setItem('qizhang.transactions.v1', JSON.stringify([{
+    const transfer = {
       id: 'tx-transfer',
-      kind: 'transfer',
+      kind: 'transfer' as const,
       amount: 500,
       categoryId: 'transfer',
       accountId: 'wechat',
@@ -118,8 +114,8 @@ describe('TransactionsPage', () => {
       merchant: '账户转账',
       occurredAt: '2026-08-18T12:00:00+08:00',
       note: '转入备用金',
-    }]))
-    const { container } = await render(<FinanceProvider><TransactionsPage /></FinanceProvider>)
+    }
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ transactions: [transfer] })}><TransactionsPage /></FinanceProvider>)
 
     expect(container.querySelector('[data-transaction-row]')?.textContent).toContain('微信支付 → 支付宝')
     const amount = container.querySelector<HTMLElement>('[data-transaction-row] strong')!
@@ -181,7 +177,6 @@ describe('TransactionsPage', () => {
 
     expect([...container.querySelectorAll('[data-transaction-row]')].some(row => row.textContent?.includes('山丘咖啡'))).toBe(false)
     expect(container.textContent).toContain('已删除“山丘咖啡”')
-    expect(JSON.parse(localStorage.getItem('qizhang.transactions.v1') ?? '[]').map((item: { id: string }) => item.id)).not.toContain('tx-0818-coffee')
 
     const undoButton = container.querySelector<HTMLButtonElement>('[data-undo]')
     expect(undoButton).toBeTruthy()
@@ -189,7 +184,6 @@ describe('TransactionsPage', () => {
     await click(undoButton)
 
     expect([...container.querySelectorAll('[data-transaction-row]')].some(row => row.textContent?.includes('山丘咖啡'))).toBe(true)
-    expect(JSON.parse(localStorage.getItem('qizhang.transactions.v1') ?? '[]').map((item: { id: string }) => item.id)).toContain('tx-0818-coffee')
   })
 
   it('删除后五秒关闭 Toast 但保持已删除状态', async () => {
@@ -274,15 +268,7 @@ describe('TransactionsPage', () => {
   })
 
   it('删除持久化失败时保留交易并显示错误', async () => {
-    const storage: Storage = {
-      ...localStorage,
-      setItem: () => {
-        throw new Error('quota exceeded')
-      },
-    }
-    const { container } = await render(
-      <FinanceProvider repository={createTransactionRepository(storage)}><TransactionsPage /></FinanceProvider>,
-    )
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ fail: { delete: true } })}><TransactionsPage /></FinanceProvider>)
 
     await click(container.querySelector<HTMLButtonElement>('[data-delete-transaction="tx-0818-coffee"]')!)
 
@@ -292,20 +278,9 @@ describe('TransactionsPage', () => {
   })
 
   it('恢复持久化失败时保持删除状态和 Toast', async () => {
-    let rejectWrites = false
-    const storage: Storage = {
-      ...localStorage,
-      setItem: (key, value) => {
-        if (rejectWrites) throw new Error('quota exceeded')
-        localStorage.setItem(key, value)
-      },
-    }
-    const { container } = await render(
-      <FinanceProvider repository={createTransactionRepository(storage)}><TransactionsPage /></FinanceProvider>,
-    )
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ fail: { restore: true } })}><TransactionsPage /></FinanceProvider>)
 
     await click(container.querySelector<HTMLButtonElement>('[data-delete-transaction="tx-0818-coffee"]')!)
-    rejectWrites = true
     await click(container.querySelector<HTMLButtonElement>('[data-undo]')!)
 
     expect([...container.querySelectorAll('[data-transaction-row]')].some(row => row.textContent?.includes('山丘咖啡'))).toBe(false)
@@ -315,48 +290,25 @@ describe('TransactionsPage', () => {
 
   it('接近截止时间恢复失败后保留新的可重试撤销窗口', async () => {
     vi.useFakeTimers()
-    let rejectWrites = false
-    const storage: Storage = {
-      ...localStorage,
-      setItem: (key, value) => {
-        if (rejectWrites) throw new Error('quota exceeded')
-        localStorage.setItem(key, value)
-      },
-    }
-    const { container } = await render(
-      <FinanceProvider repository={createTransactionRepository(storage)}><TransactionsPage /></FinanceProvider>,
-    )
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ fail: { restore: true } })}><TransactionsPage /></FinanceProvider>)
 
     await click(container.querySelector<HTMLButtonElement>('[data-delete-transaction="tx-0818-coffee"]')!)
     await act(async () => vi.advanceTimersByTime(4900))
-    rejectWrites = true
     await click(container.querySelector<HTMLButtonElement>('[data-undo]')!)
     await act(async () => vi.advanceTimersByTime(100))
 
     expect(container.textContent).toContain('已删除“山丘咖啡”')
     expect(container.querySelector('[data-undo]')).toBeTruthy()
 
-    rejectWrites = false
     await click(container.querySelector<HTMLButtonElement>('[data-undo]')!)
     expect([...container.querySelectorAll('[data-transaction-row]')].some(row => row.textContent?.includes('山丘咖啡'))).toBe(true)
   })
 
   it('恢复失败后的新撤销窗口到期时一并清除 Toast 和对应错误', async () => {
     vi.useFakeTimers()
-    let rejectWrites = false
-    const storage: Storage = {
-      ...localStorage,
-      setItem: (key, value) => {
-        if (rejectWrites) throw new Error('quota exceeded')
-        localStorage.setItem(key, value)
-      },
-    }
-    const { container } = await render(
-      <FinanceProvider repository={createTransactionRepository(storage)}><TransactionsPage /></FinanceProvider>,
-    )
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ fail: { restore: true } })}><TransactionsPage /></FinanceProvider>)
 
     await click(container.querySelector<HTMLButtonElement>('[data-delete-transaction="tx-0818-coffee"]')!)
-    rejectWrites = true
     await click(container.querySelector<HTMLButtonElement>('[data-undo]')!)
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('保存失败，输入内容已保留。')
 

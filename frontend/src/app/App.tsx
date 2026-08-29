@@ -1,5 +1,5 @@
 import type { AccountLabel, Category, ViewId } from '../domain/types'
-import { createTransactionRepository } from '../data/transactionRepository'
+import { createFinanceApi, type FinanceApi } from '../api/financeApi'
 import { FinanceProvider } from './FinanceProvider'
 import { OverviewPage } from '../features/overview/OverviewPage'
 import { TransactionsPage } from '../features/transactions/TransactionsPage'
@@ -12,12 +12,12 @@ export interface AppProps {
   initialView?: ViewId
   categories?: Category[]
   accounts?: AccountLabel[]
-  repository?: ReturnType<typeof createTransactionRepository>
+  api?: FinanceApi
 }
 
-export function App({ initialView = 'overview', categories, accounts, repository }: AppProps) {
+export function App({ initialView = 'overview', categories, accounts, api }: AppProps) {
   return (
-    <FinanceProvider initialView={initialView} initialCategories={categories} initialAccounts={accounts} repository={repository}>
+    <FinanceProvider api={api ?? createFinanceApi()} initialView={initialView} initialCategories={categories} initialAccounts={accounts}>
       <AppShell transactionsPage={<TransactionsPage />} analyticsPage={<AnalyticsPage />} reportsPage={<MonthlyReportPage />} labelsPage={<LabelsPage />}><OverviewPage /></AppShell>
     </FinanceProvider>
   )

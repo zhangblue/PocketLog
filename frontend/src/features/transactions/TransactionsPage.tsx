@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useFinance } from '../../app/FinanceProvider'
 import { Toast } from '../../components/Toast'
-import { monthKey } from '../../domain/selectors'
 
 function formatAmount(amount: number, kind: 'expense' | 'income' | 'transfer') {
   const prefix = kind === 'income' ? '+' : kind === 'expense' ? '-' : '↔'
@@ -31,16 +30,11 @@ export function TransactionsPage() {
   const titleRef = useRef<HTMLHeadingElement>(null)
   const undoRef = useRef<HTMLButtonElement>(null)
   const previousDeletedTransactionIdRef = useRef<string | undefined>(undefined)
-  const months = [...new Set([state.month, state.filter.month, ...state.transactions.map(item => monthKey(item.occurredAt)).filter(Boolean)])].sort().reverse()
+  // The API response is already filtered (and may be cursor-paginated). Keeping
+  // a second client-side filter here would incorrectly discard server results
+  // and make drill-down evidence differ from the query that produced it.
   const visible = state.transactions
-    .filter(item => state.filter.dateFrom && state.filter.dateTo
-      ? item.occurredAt.slice(0, 10) >= state.filter.dateFrom && item.occurredAt.slice(0, 10) <= state.filter.dateTo
-      : item.occurredAt.startsWith(state.filter.month))
-    .filter(item => !state.filter.kind || item.kind === state.filter.kind)
-    .filter(item => !state.filter.kinds || state.filter.kinds.includes(item.kind))
-    .filter(item => !state.filter.categoryId || item.categoryId === state.filter.categoryId)
-    .filter(item => !state.filter.accountId || item.accountId === state.filter.accountId)
-    .filter(item => !state.filter.weekendOnly || [0, 6].includes(new Date(`${item.occurredAt.slice(0, 10)}T00:00:00Z`).getUTCDay()))
+  const months = [...new Set([state.month, state.filter.month, ...(state.bootstrap.value?.months ?? [])])].sort().reverse()
   const activeFilterSummary = [
     formatMonth(state.filter.month),
     state.filter.kind && `类型：${({ expense: '支出', income: '收入', transfer: '转账' })[state.filter.kind]}`,
@@ -69,18 +63,18 @@ export function TransactionsPage() {
     }
   }, [saveError, state.deletedTransaction?.id])
 
-  function deleteTransaction(id: string) {
+  async function deleteTransaction(id: string) {
     const transaction = state.transactions.find(item => item.id === id)
     if (!transaction) return
 
     setSaveError(undefined)
-    const result = actions.deleteTransaction(transaction)
+    const result = await actions.deleteTransaction(transaction)
     if (!result.ok) setSaveError({ message: result.message })
   }
 
-  function restoreTransaction() {
+  async function restoreTransaction() {
     setSaveError(undefined)
-    const result = actions.restoreTransaction()
+    const result = await actions.restoreTransaction()
     if (!result.ok) setSaveError({ message: result.message, deletedTransactionId: state.deletedTransaction?.id })
   }
 
@@ -161,6 +155,7 @@ export function TransactionsPage() {
         })}
       </div>
       {visible.length === 0 && <p className="transaction-empty" role="status">未找到交易</p>}
+      {state.transactionCursor && <button type="button" data-load-more onClick={() => void actions.loadMoreTransactions()} disabled={state.transactionsLoadingMore}>{state.transactionsLoadingMore ? '加载中…' : '加载更多'}</button>}
       {saveError && <p className="transaction-save-error" role="alert">{saveError.message}</p>}
       <Toast open={Boolean(state.deletedTransaction)}>
         已删除“{state.deletedTransaction?.merchant}”

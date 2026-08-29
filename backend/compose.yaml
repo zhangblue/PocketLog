@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in the process environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the process environment}
+      POSTGRES_DB: ${POSTGRES_DB:-pocket_log}
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  migrate:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+      target: rust-build
+    command: ["cargo", "run", "--manifest-path", "backend/Cargo.toml", "--", "migrate"]
+    profiles: ["migration"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pocket_log}
+    depends_on:
+      postgres:
+        condition: service_healthy
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pocket_log}
+      FRONTEND_DIST_DIR: /app/frontend/dist
+      BIND_ADDR: 0.0.0.0:3000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy

@@ -2,8 +2,16 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { useFinance } from '../../app/FinanceProvider'
 import { EmptyState } from '../../components/EmptyState'
 import { AsyncPanel } from '../../components/AsyncPanel'
-import { compareCategoryBreakdowns, daysInMonth, formatCurrency, isValidCalendarDate, isValidMonth, previousMonth, selectCategoryBreakdownForTransactions, selectDailyTrend, selectRangeTransactions } from '../../domain/selectors'
-import type { Insight, Transaction, TransactionFilter } from '../../domain/types'
+import { daysInMonth, formatCurrency, isValidCalendarDate, previousMonth } from '../../domain/selectors'
+import type { TransactionFilter } from '../../domain/types'
+
+const MAX_X_AXIS_LABELS = 6
+const TREND_Y_AXIS_TICKS = 4
+const TREND_CHART_LEFT = 56
+const TREND_CHART_TOP = 18
+const TREND_CHART_WIDTH = 524
+const TREND_CHART_HEIGHT = 128
+const TREND_CHART_BOTTOM = TREND_CHART_TOP + TREND_CHART_HEIGHT
 
 function monthBounds(month: string) {
   return { startDate: `${month}-01`, endDate: `${month}-${String(daysInMonth(month)).padStart(2, '0')}` }
@@ -28,42 +36,52 @@ function comparisonLabel(changePercent: number | null) {
   return changePercent >= 0 ? `↑ 增长 ${changePercent}%` : `↓ 下降 ${Math.abs(changePercent)}%`
 }
 
-function activate(event: React.KeyboardEvent<HTMLButtonElement>, action: () => void) {
+function activate(event: React.KeyboardEvent<Element>, action: () => void) {
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
     action()
   }
 }
 
-function rangeInsights(items: Transaction[], comparisons: ReturnType<typeof compareCategoryBreakdowns>, startDate: string, endDate: string, month: string): Insight[] {
-  const transport = comparisons.find(item => item.categoryId === 'transport')
-  const transportRows = items.filter(item => item.kind === 'expense' && item.categoryId === 'transport')
-  const weekend = transportRows.filter(item => [0, 6].includes(new Date(`${item.occurredAt.slice(0, 10)}T00:00:00Z`).getUTCDay())).reduce((sum, item) => sum + item.amount, 0)
-  const weekday = transportRows.filter(item => ![0, 6].includes(new Date(`${item.occurredAt.slice(0, 10)}T00:00:00Z`).getUTCDay())).reduce((sum, item) => sum + item.amount, 0)
-  const expense = items.filter(item => item.kind === 'expense').reduce((sum, item) => sum + item.amount, 0)
-  const income = items.filter(item => item.kind === 'income').reduce((sum, item) => sum + item.amount, 0)
-  const result: Insight[] = []
-  if (weekend > 0 && weekend >= weekday) result.push({ id: 'transport-weekend', title: '周末交通支出偏高', detail: `周末交通共 ¥${weekend.toFixed(0)}，不低于工作日交通`, filter: { month, kind: 'expense', categoryId: 'transport', dateFrom: startDate, dateTo: endDate, weekendOnly: true, sourceLabel: '周末交通支出偏高' }, tone: 'attention' })
-  if (transport?.changePercent !== null && transport?.changePercent !== undefined) result.push({ id: 'transport-change', title: `交通支出${transport.changePercent >= 0 ? '↑ 增长' : '↓ 下降'} ${Math.abs(transport.changePercent)}%`, detail: '与上一相同长度周期相比', filter: { month, kind: 'expense', categoryId: 'transport', dateFrom: startDate, dateTo: endDate, sourceLabel: '交通支出变化' }, tone: 'neutral' })
-  if (income > 0 || expense > 0) result.push({ id: 'savings-rate', title: `本期结余率 ${income === 0 ? 0 : Number((((income - expense) / income) * 100).toFixed(1))}%`, detail: '收入减支出后的结余比例', filter: { month, kinds: ['expense', 'income'], dateFrom: startDate, dateTo: endDate, sourceLabel: '本期结余表现' }, tone: income > expense ? 'positive' : 'attention' })
-  return result
+/** 返回横轴需要显示文字的趋势索引；数据点始终完整保留，只压缩文字刻度。 */
+function trendAxisIndexes(length: number) {
+  if (length <= MAX_X_AXIS_LABELS) return Array.from({ length }, (_, index) => index)
+  return Array.from({ length: MAX_X_AXIS_LABELS }, (_, slot) =>
+    Math.round(slot * (length - 1) / (MAX_X_AXIS_LABELS - 1)),
+  )
+}
+
+/** 将最大支出向上取整到易读量级，避免图表最高柱贴住边界。 */
+function trendScaleMax(maximum: number) {
+  if (maximum <= 0) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(maximum))
+  return Math.ceil(maximum / magnitude) * magnitude
 }
 
 export function AnalyticsPage() {
   const { state, actions } = useFinance()
   const pageRef = useRef<HTMLElement>(null)
   const [rangeError, setRangeError] = useState('')
+  // SVG 柱子悬停和键盘焦点共用这一状态，确保两种输入方式展示相同信息。
+  const [trendTooltip, setTrendTooltip] = useState<{ date: string; amount: number; index: number } | null>(null)
   const context = state.analytics
-  const availableMonths = [...new Set(state.transactions.filter(item => item.kind === 'expense' && (!context.accountId || item.accountId === context.accountId)).map(item => item.occurredAt.slice(0, 7)).filter(isValidMonth))]
-  const threeMonthsAvailable = hasThreeContinuousMonths(availableMonths, state.month)
-  const rangeTransactions = selectRangeTransactions(state.transactions, context.startDate, context.endDate)
-  const filteredTransactions = rangeTransactions.filter(item => !context.accountId || item.accountId === context.accountId)
-  const breakdown = selectCategoryBreakdownForTransactions(filteredTransactions)
+  const apiData = state.analyticsState.value?.data
+  const availableMonths = state.bootstrap.value?.months ?? []
+  const accountAvailableMonths = context.accountId
+    ? state.bootstrap.value?.accountMonths?.[context.accountId] ?? [...new Set(state.transactions.filter(item => item.accountId === context.accountId || item.targetAccountId === context.accountId).map(item => item.occurredAt.slice(0, 7)))]
+    : availableMonths
+  const threeMonthsAvailable = hasThreeContinuousMonths(accountAvailableMonths, state.month)
+  const breakdown = apiData?.composition.map(item => ({ categoryId: item.categoryId ?? 'other', amount: Number(item.amount), ratio: 0 })) ?? []
+  const breakdownTotal = breakdown.reduce((sum, item) => sum + item.amount, 0)
+  const normalizedBreakdown = breakdown.map(item => ({ ...item, ratio: breakdownTotal ? item.amount / breakdownTotal : 0 }))
   const previousRange = shiftRange(context.startDate, context.endDate)
-  const comparisons = compareCategoryBreakdowns(breakdown, selectCategoryBreakdownForTransactions(selectRangeTransactions(state.transactions, previousRange.startDate, previousRange.endDate).filter(item => !context.accountId || item.accountId === context.accountId)))
-  const trend = selectDailyTrend(filteredTransactions, context.startDate, context.endDate)
-  const displayInsights = rangeInsights(filteredTransactions, comparisons, context.startDate, context.endDate, state.month)
-  const maxTrend = Math.max(...trend.map(item => item.amount), 1)
+  const comparisons = apiData?.categoryChanges.map(item => ({ categoryId: item.categoryId, current: Number(item.current), previous: Number(item.previous), changePercent: item.changeRate == null ? null : Number(item.changeRate) })) ?? []
+  const trend = apiData?.trend.map(item => ({ date: item.date, amount: Number(item.amount) })) ?? []
+  const displayInsights = state.analyticsState.value?.insights.map(item => ({ id: item.id, title: item.title, detail: item.detail, tone: item.tone, filter: item.drilldown?.currentFilter ?? { month: state.month, sourceLabel: item.title } })) ?? []
+  const maxTrend = Math.max(...trend.map(item => item.amount), 0)
+  const trendScale = trendScaleMax(maxTrend)
+  const trendAxisLabelIndexes = trendAxisIndexes(trend.length)
+  const trendYTicks = Array.from({ length: TREND_Y_AXIS_TICKS }, (_, index) => trendScale * (TREND_Y_AXIS_TICKS - index - 1) / (TREND_Y_AXIS_TICKS - 1))
   const trendTitleId = useId()
   const trendDescriptionId = useId()
 
@@ -80,7 +98,9 @@ export function AnalyticsPage() {
 
   function changeAccount(accountId: string) {
     const nextAccountId = accountId || undefined
-    const months = [...new Set(state.transactions.filter(item => item.kind === 'expense' && (!nextAccountId || item.accountId === nextAccountId)).map(item => item.occurredAt.slice(0, 7)).filter(isValidMonth))]
+    const months = nextAccountId
+      ? state.bootstrap.value?.accountMonths?.[nextAccountId] ?? [...new Set(state.transactions.filter(item => item.accountId === nextAccountId || item.targetAccountId === nextAccountId).map(item => item.occurredAt.slice(0, 7)))]
+      : availableMonths
     if (context.range === 'three-months' && !hasThreeContinuousMonths(months, state.month)) {
       actions.changeAnalyticsContext({ ...context, accountId: nextAccountId, range: 'month', ...monthBounds(state.month), scrollTop: 0, scrollRestorePending: false })
       return
@@ -118,7 +138,14 @@ export function AnalyticsPage() {
 
   function openDetail(filter: Omit<TransactionFilter, 'month'>, sourceLabel: string) {
     actions.changeAnalyticsContext({ ...context, scrollTop: window.scrollY, scrollRestorePending: true })
-    actions.openInsight({ month: filter.dateFrom ? filter.dateFrom.slice(0, 7) : state.month, dateFrom: context.startDate, dateTo: context.endDate, accountId: context.accountId || undefined, ...(filter.kinds ? {} : { kind: 'expense' as const }), ...filter, sourceLabel })
+    actions.openInsight({
+      ...filter,
+      month: filter.dateFrom ? filter.dateFrom.slice(0, 7) : state.month,
+      // Every drill-down must preserve the active account and the evidence
+      // kind selected by the originating analysis component.
+      accountId: filter.accountId ?? context.accountId,
+      sourceLabel,
+    })
   }
 
   return (
@@ -127,19 +154,97 @@ export function AnalyticsPage() {
         <div><h1 id="analytics-title">消费分析</h1><p>{context.startDate} 至 {context.endDate} · 按分类与账户理解支出变化</p></div>
         <label className="analytics-account">账户<select data-analytics-account value={context.accountId ?? ''} onChange={event => changeAccount(event.target.value)}><option value="">全部账户</option>{state.accounts.map(account => <option key={account.id} value={account.id}>{account.name}{account.active ? '' : '（已停用）'}</option>)}</select></label>
       </div>
+      {state.analyticsState.status === 'loading' && <p className="panel-loading" role="status">分析加载中…</p>}
+      {state.analyticsState.status === 'error' && <p className="panel-error" role="alert">分析暂时无法加载。<button type="button" onClick={() => actions.retryDataLoad('analytics')}>重试</button></p>}
+      {state.analyticsState.stale && state.analyticsState.status !== 'ready' && <p className="panel-stale" role="status">当前显示最近一次成功的分析结果。</p>}
       <div className="analytics-controls" role="group" aria-label="分析时间范围">
         <button type="button" data-range="month" aria-pressed={context.range === 'month'} onClick={() => changeRange('month')}>本月</button>
         <button type="button" data-range="three-months" aria-pressed={context.range === 'three-months'} disabled={!threeMonthsAvailable} onClick={() => changeRange('three-months')}>近 3 月</button>
         <button type="button" data-range="custom" aria-pressed={context.range === 'custom'} onClick={() => changeRange('custom')}>自定义</button>
         {!threeMonthsAvailable && <p className="analytics-history-notice" role="status">历史数据不足，尚不能生成近 3 月趋势。</p>}
       </div>
-      {!threeMonthsAvailable && <EmptyState variant="insufficient-history" onAction={actions.openDrawer} />}
+      {!threeMonthsAvailable && !apiData && <EmptyState variant="insufficient-history" onAction={actions.openDrawer} />}
       {context.range === 'custom' && <div className="analytics-custom-month"><label>开始日期<input data-custom-start type="date" value={context.startDate} onChange={event => changeCustom('startDate', event.target.value)} /></label><label>结束日期<input data-custom-end type="date" value={context.endDate} onChange={event => changeCustom('endDate', event.target.value)} /></label>{rangeError && <p role="alert">{rangeError}</p>}</div>}
-      {breakdown.length === 0 ? <EmptyState variant={state.transactions.length === 0 ? 'first-use' : 'no-results'} onAction={state.transactions.length === 0 ? actions.openDrawer : resetNoResults} /> : <div className="analytics-grid">
-        <AsyncPanel className="panel analytics-panel analytics-trend-panel" headingLevel={2} title="支出趋势" status="ready"><p className="panel-description">按发生日期查看支出</p><figure><svg role="img" aria-labelledby={`${trendTitleId} ${trendDescriptionId}`} viewBox="0 0 600 180"><title id={trendTitleId}>支出趋势</title><desc id={trendDescriptionId}>{trend.map(item => `${item.date} ¥${item.amount.toLocaleString('zh-CN')}`).join('；')}</desc>{trend.map((item, index) => <rect key={item.date} x={20 + index * (560 / Math.max(trend.length, 1))} y={160 - item.amount / maxTrend * 130} width={Math.max(8, 500 / Math.max(trend.length, 1))} height={item.amount / maxTrend * 130} className="analytics-trend-bar" />)}</svg><figcaption>{trend.map(item => `${item.date} ¥${item.amount.toLocaleString('zh-CN')}`).join('；')}</figcaption></figure><div className="analytics-trend-buttons">{trend.map(item => <button key={item.date} type="button" data-trend-bar={item.date} onClick={() => openDetail({ dateFrom: item.date, dateTo: item.date }, `${item.date} 支出`)} onKeyDown={event => activate(event, () => openDetail({ dateFrom: item.date, dateTo: item.date }, `${item.date} 支出`))}>{item.date} ¥{item.amount.toLocaleString('zh-CN')}</button>)}</div></AsyncPanel>
-        <section className="panel analytics-panel" aria-labelledby="analytics-category-title"><div className="panel-head"><div><h2 id="analytics-category-title">分类构成</h2><p>选择分类查看对应交易</p></div></div><div className="analytics-category-list" aria-label="分类构成">{breakdown.map(item => { const category = state.categories.find(candidate => candidate.id === item.categoryId); const label = `${category?.name ?? item.categoryId}支出构成`; return <button key={item.categoryId} type="button" data-category-share={item.categoryId} onClick={() => openDetail({ categoryId: item.categoryId }, label)} onKeyDown={event => activate(event, () => openDetail({ categoryId: item.categoryId }, label))}><span>{category?.name ?? item.categoryId}</span><strong>{formatCurrency(item.amount)}</strong><small>{Math.round(item.ratio * 100)}%</small></button> })}</div></section>
+      {normalizedBreakdown.length === 0 ? <EmptyState variant={apiData ? 'no-results' : state.transactions.length === 0 ? 'first-use' : 'no-results'} onAction={apiData || state.transactions.length > 0 ? resetNoResults : actions.openDrawer} /> : <div className="analytics-grid">
+          <AsyncPanel className="panel analytics-panel analytics-trend-panel" headingLevel={2} title="支出趋势" status="ready">
+            <p className="panel-description">按发生日期查看支出</p>
+            <figure>
+              <svg role="group" aria-labelledby={`${trendTitleId} ${trendDescriptionId}`} viewBox="0 0 600 180">
+                <title id={trendTitleId}>支出趋势</title>
+                <desc id={trendDescriptionId}>{trend.map(item => `${item.date} ${formatCurrency(item.amount)}`).join('；')}</desc>
+                {trendYTicks.map((amount, index) => {
+                  const y = TREND_CHART_TOP + index * TREND_CHART_HEIGHT / (TREND_Y_AXIS_TICKS - 1)
+                  return (
+                    <g key={amount}>
+                      <line className="analytics-trend-grid" x1={TREND_CHART_LEFT} x2={TREND_CHART_LEFT + TREND_CHART_WIDTH} y1={y} y2={y} />
+                      <text data-trend-y-axis-label className="analytics-trend-y-axis-label" x={TREND_CHART_LEFT - 8} y={y + 3} textAnchor="end">{formatCurrency(amount)}</text>
+                    </g>
+                  )
+                })}
+                {trend.map((item, index) => {
+                  const slotWidth = TREND_CHART_WIDTH / Math.max(trend.length, 1)
+                  const barWidth = Math.max(8, Math.min(28, slotWidth * .65))
+                  const x = TREND_CHART_LEFT + index * slotWidth + (slotWidth - barWidth) / 2
+                  const height = item.amount / trendScale * TREND_CHART_HEIGHT
+                  const y = TREND_CHART_BOTTOM - height
+                  // 零支出日期仍保留最小透明命中区，使其可提示和键盘下钻。
+                  const hitHeight = Math.max(height, 12)
+                  const showTooltip = () => setTrendTooltip({ ...item, index })
+                  const hideTooltip = () => setTrendTooltip(null)
+                  const openTrendDetail = () => openDetail({ dateFrom: item.date, dateTo: item.date, kind: 'expense' }, `${item.date} 支出`)
+                  return (
+                    <g key={item.date}>
+                      <rect x={x} y={y} width={barWidth} height={height} className="analytics-trend-bar" />
+                      <rect
+                        data-trend-column={item.date}
+                        x={x}
+                        y={TREND_CHART_BOTTOM - hitHeight}
+                        width={barWidth}
+                        height={hitHeight}
+                        className="analytics-trend-hit-target"
+                        fill="transparent"
+                        pointerEvents="all"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${item.date} 支出 ${formatCurrency(item.amount)}`}
+                        // 原生事件也要响应，令既有测试工具和实际鼠标悬停共享提示状态。
+                        ref={element => {
+                          if (element) {
+                            element.onmouseenter = showTooltip
+                            element.onmouseleave = hideTooltip
+                          }
+                        }}
+                        onFocus={showTooltip}
+                        onBlur={hideTooltip}
+                        onClick={openTrendDetail}
+                        onKeyDown={event => activate(event, openTrendDetail)}
+                      />
+                    </g>
+                  )
+                })}
+                {trendAxisLabelIndexes.map(index => {
+                  const item = trend[index]
+                  const slotWidth = TREND_CHART_WIDTH / Math.max(trend.length, 1)
+                  return <text key={item.date} data-trend-axis-label className="analytics-trend-axis-label" x={TREND_CHART_LEFT + index * slotWidth + slotWidth / 2} y={174} textAnchor="middle">{item.date.slice(5)}</text>
+                })}
+                {trendTooltip && (() => {
+                  const slotWidth = TREND_CHART_WIDTH / Math.max(trend.length, 1)
+                  const tooltipX = Math.min(Math.max(TREND_CHART_LEFT + trendTooltip.index * slotWidth + slotWidth / 2, 86), 514)
+                  const tooltipY = Math.max(TREND_CHART_TOP + 18, TREND_CHART_BOTTOM - trendTooltip.amount / trendScale * TREND_CHART_HEIGHT - 10)
+                  return (
+                    <g className="analytics-trend-tooltip" pointerEvents="none">
+                      <rect x={tooltipX - 80} y={tooltipY - 16} width="160" height="22" rx="4" />
+                      <text data-trend-tooltip x={tooltipX} y={tooltipY} textAnchor="middle">{trendTooltip.date} · {formatCurrency(trendTooltip.amount)}</text>
+                    </g>
+                  )
+                })()}
+              </svg>
+              <figcaption>{trend.map(item => `${item.date} ${formatCurrency(item.amount)}`).join('；')}</figcaption>
+            </figure>
+          </AsyncPanel>
+        <section className="panel analytics-panel" aria-labelledby="analytics-category-title"><div className="panel-head"><div><h2 id="analytics-category-title">分类构成</h2><p>选择分类查看对应交易</p></div></div><div className="analytics-category-list" aria-label="分类构成">{normalizedBreakdown.map(item => { const category = state.categories.find(candidate => candidate.id === item.categoryId); const label = `${category?.name ?? item.categoryId}支出构成`; return <button key={item.categoryId} type="button" data-category-share={item.categoryId} onClick={() => openDetail({ categoryId: item.categoryId }, label)} onKeyDown={event => activate(event, () => openDetail({ categoryId: item.categoryId }, label))}><span>{category?.name ?? item.categoryId}</span><strong>{formatCurrency(item.amount)}</strong><small>{Math.round(item.ratio * 100)}%</small></button> })}</div></section>
         <section className="panel analytics-panel" aria-labelledby="analytics-comparison-title"><div className="panel-head"><div><h2 id="analytics-comparison-title">分类对比</h2><p>与上一相同长度周期相比</p></div></div><div className="analytics-comparison-list" aria-label="分类环比">{comparisons.map(item => { const category = state.categories.find(candidate => candidate.id === item.categoryId); const label = `${category?.name ?? item.categoryId}支出对比`; const evidence = item.current === 0 && item.previous > 0 ? previousRange : context; return <button key={item.categoryId} type="button" data-category-comparison={item.categoryId} onClick={() => openDetail({ categoryId: item.categoryId, dateFrom: evidence.startDate, dateTo: evidence.endDate }, label)} onKeyDown={event => activate(event, () => openDetail({ categoryId: item.categoryId, dateFrom: evidence.startDate, dateTo: evidence.endDate }, label))}><span>{category?.name ?? item.categoryId}</span><strong>{formatCurrency(item.current)}</strong><small>{comparisonLabel(item.changePercent)}</small></button> })}</div></section>
-        <section className="insight-list analytics-insight-list" aria-label="消费洞察">{displayInsights.length ? displayInsights.map(insight => { const { month: _month, sourceLabel: _sourceLabel, ...filter } = insight.filter; return <button key={insight.id} type="button" className={`insight-card ${insight.tone}`} data-insight={insight.id} onClick={() => openDetail(filter, insight.title)} onKeyDown={event => activate(event, () => openDetail(filter, insight.title))}><strong>{insight.title}</strong><span>{insight.detail}</span></button> }) : <p className="analytics-insight-empty" role="status">当前范围暂无可验证洞察</p>}</section>
+        <section className="insight-list analytics-insight-list" aria-label="消费洞察">{displayInsights.length ? displayInsights.map(insight => <button key={insight.id} type="button" className={`insight-card ${insight.tone}`} data-insight={insight.id} onClick={() => openDetail(insight.filter, insight.title)} onKeyDown={event => activate(event, () => openDetail(insight.filter, insight.title))}><strong>{insight.title}</strong><span>{insight.detail}</span></button>) : <p className="analytics-insight-empty" role="status">当前范围暂无可验证洞察</p>}</section>
       </div>}
     </section>
   )

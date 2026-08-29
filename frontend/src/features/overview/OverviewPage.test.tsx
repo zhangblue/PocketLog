@@ -1,13 +1,15 @@
 import { act } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FinanceProvider, useFinanceState } from '../../app/FinanceProvider'
 import type { Transaction } from '../../domain/types'
 import { AppShell } from '../../layout/AppShell'
 import { click, render } from '../../test/render'
 import { OverviewPage } from './OverviewPage'
+import type { FinanceApi } from '../../api/financeApi'
+import { createFixtureApi } from '../../test/financeApi'
 
 function OverviewApp() {
-  return <FinanceProvider><AppShell><OverviewPage /></AppShell><FinanceProbe /></FinanceProvider>
+  return <FinanceProvider api={createFixtureApi()}><AppShell><OverviewPage /></AppShell><FinanceProbe /></FinanceProvider>
 }
 
 function FinanceProbe() {
@@ -19,11 +21,25 @@ function DateBoundaryApp() {
   const transactions: Transaction[] = [{
     id: 'tx-date-boundary', kind: 'expense', amount: 128.6, categoryId: 'food', accountId: 'wechat', merchant: '日期边界交易', occurredAt: '2026-08-01T23:30:00+08:00', note: '',
   }]
-  const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-  return <FinanceProvider repository={repository}><AppShell><OverviewPage /></AppShell></FinanceProvider>
+  return <FinanceProvider api={createFixtureApi({ transactions })}><AppShell><OverviewPage /></AppShell></FinanceProvider>
 }
 
 describe('OverviewPage', () => {
+  it('API 模式展示服务端总览结果而不是本地 selector 结果', async () => {
+    const api = {
+      bootstrap: vi.fn().mockResolvedValue({ categories: [{ id: 'server-food', name: '服务端分类', kind: 'expense', emoji: '🍜', color: '#4f8a75', semanticKey: 'server-food', sortOrder: 1, active: true }], accounts: [], months: ['2026-08'], dataRevision: 1, serverTime: '2026-08-27T00:00:00Z' }),
+      listTransactions: vi.fn().mockResolvedValue({ items: [], nextCursor: null, dataRevision: 1 }),
+      overview: vi.fn().mockResolvedValue({ data: { summary: { expense: '999.00', income: '1200.00', transfer: '0.00', balance: '201.00', savingsRate: '16.8', dailyExpense: '32.23', transactionCount: 7 }, trend: [{ date: '2026-08-27', amount: '999.00' }], composition: [{ categoryId: 'server-food', name: '服务端分类', amount: '999.00', includedCategoryIds: ['server-food'] }], categoryChanges: [] }, insights: [], dataRevision: 1 }),
+      analytics: vi.fn().mockResolvedValue({ data: { summary: { expense: '0', income: '0', transfer: '0', balance: '0', savingsRate: '0', dailyExpense: '0', transactionCount: 0 }, trend: [], composition: [], categoryChanges: [] }, insights: [], dataRevision: 1 }),
+      monthlyReport: vi.fn().mockResolvedValue({ data: { story: 'server report' }, dataRevision: 1 }),
+    } as unknown as FinanceApi
+    const { container } = await render(<FinanceProvider api={api} initialFilter={{ month: '2026-08' }}><OverviewPage /></FinanceProvider>)
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+
+    expect(container.textContent).toContain('¥999')
+    expect(container.textContent).toContain('服务端分类')
+  })
+
   it('展示月度汇总、趋势文字摘要和恰好 5 条最近明细', async () => {
     const { container } = await render(<OverviewApp />)
 
@@ -55,8 +71,7 @@ describe('OverviewPage', () => {
       { id: 'jan-expense', kind: 'expense', amount: 310, categoryId: 'food', accountId: 'cash', merchant: '一月支出', occurredAt: '2028-01-10T12:00:00+08:00', note: '' },
       { id: 'jan-income', kind: 'income', amount: 800, categoryId: 'salary', accountId: 'cash', merchant: '一月收入', occurredAt: '2028-01-11T12:00:00+08:00', note: '' },
     ]
-    const repository = { load: () => transactions, save: () => ({ ok: true } as const) }
-    const { container } = await render(<FinanceProvider initialFilter={{ month: '2028-02' }} repository={repository}><OverviewPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider initialFilter={{ month: '2028-02' }} api={createFixtureApi({ transactions })}><OverviewPage /></FinanceProvider>)
     const cards = [...container.querySelectorAll<HTMLElement>('[aria-label="月度汇总"] article')]
 
     expect(cards).toHaveLength(4)
@@ -67,8 +82,7 @@ describe('OverviewPage', () => {
 
   it('最近明细把转账显示为中性资金移动而非负支出', async () => {
     const transfer: Transaction = { id: 'transfer', kind: 'transfer', amount: 500, categoryId: 'transfer', accountId: 'wechat', targetAccountId: 'bank', merchant: '资金调拨', occurredAt: '2026-08-20T12:00:00+08:00', note: '' }
-    const repository = { load: () => [transfer], save: () => ({ ok: true } as const) }
-    const { container } = await render(<FinanceProvider repository={repository}><OverviewPage /></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ transactions: [transfer] })}><OverviewPage /></FinanceProvider>)
     const amount = container.querySelector<HTMLElement>('[data-transaction-row] strong')!
 
     expect(amount.textContent).toBe('↔ ¥500.00')
@@ -143,8 +157,7 @@ describe('OverviewPage', () => {
   })
 
   it('没有交易时显示首次使用引导，而非零值图表和空表格', async () => {
-    const repository = { load: () => [] as Transaction[], save: () => ({ ok: true } as const) }
-    const { container } = await render(<FinanceProvider repository={repository}><AppShell><OverviewPage /></AppShell></FinanceProvider>)
+    const { container } = await render(<FinanceProvider api={createFixtureApi({ transactions: [] })}><AppShell><OverviewPage /></AppShell></FinanceProvider>)
 
     expect(container.textContent).toContain('从第一笔交易开始')
     expect(container.querySelector('[aria-label="月度汇总"]')).toBeNull()
