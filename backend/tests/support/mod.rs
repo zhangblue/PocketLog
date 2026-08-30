@@ -35,7 +35,7 @@ impl TestDatabase {
         let admin = Database::connect(admin_options)
             .await
             .expect("connect to PostgreSQL test database");
-        let schema = format!("qizhang_test_{}", Uuid::new_v4().simple());
+        let schema = format!("pocket_log_test_{}", Uuid::new_v4().simple());
         admin
             .execute_unprepared(&format!("CREATE SCHEMA \"{schema}\""))
             .await
@@ -117,7 +117,8 @@ impl TemporaryRelease {
     }
 
     pub fn without_config() -> Self {
-        let root = std::env::temp_dir().join(format!("qizhang-release-runtime-{}", Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("pocket-log-release-runtime-{}", Uuid::new_v4()));
         std::fs::create_dir_all(root.join("dist")).expect("create release dist directory");
         std::fs::write(root.join("dist/index.html"), "release index").expect("write release index");
         let layout = ReleaseLayout::from_executable(&root.join("pocket-log-backend"));
@@ -134,6 +135,10 @@ impl TemporaryRelease {
 
     pub fn config(&self) -> Config {
         self.layout.load_config().expect("load release config")
+    }
+
+    pub fn logs_dir(&self) -> &std::path::Path {
+        &self.layout.logs_dir
     }
 }
 

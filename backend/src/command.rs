@@ -217,7 +217,7 @@ mod tests {
     use crate::config::Config;
 
     fn config() -> Config {
-        Config::from_map([("DATABASE_URL", "postgres://not-running.invalid/qizhang")]).unwrap()
+        Config::from_map([("DATABASE_URL", "postgres://not-running.invalid/pocket_log")]).unwrap()
     }
 
     #[test]
@@ -272,7 +272,7 @@ mod tests {
         assert_eq!(
             entry(
                 Vec::<&str>::new(),
-                [("DATABASE_URL", "postgres://127.0.0.1:1/qizhang")],
+                [("DATABASE_URL", "postgres://127.0.0.1:1/pocket_log")],
             )
             .await,
             1

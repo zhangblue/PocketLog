@@ -60,7 +60,7 @@ pub fn package_current_project() -> Result<PathBuf, PackageError> {
     };
     let output = project_root
         .join("release")
-        .join(format!("qizhang-{}", current_target_name()));
+        .join(release_directory_name(&current_target_name()));
     assemble_release(&input, &output)?;
     Ok(output)
 }
@@ -106,6 +106,10 @@ pub fn executable_name(base_name: &str) -> String {
 fn current_target_name() -> String {
     // 目录名仅标记当前编译机器目标；真正的跨平台交叉编译仍由调用 Cargo 的 target 配置决定。
     format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS)
+}
+
+fn release_directory_name(target: &str) -> String {
+    format!("PocketLog-{target}")
 }
 
 fn run_build_command(command: &mut Command, failure: PackageError) -> Result<(), PackageError> {
@@ -183,7 +187,15 @@ impl PackageError {
 mod tests {
     use std::{fs, path::PathBuf};
 
-    use super::{PackageInput, assemble_release, executable_name};
+    use super::{PackageInput, assemble_release, executable_name, release_directory_name};
+
+    #[test]
+    fn release_directory_uses_pocketlog_name() {
+        assert_eq!(
+            release_directory_name("aarch64-macos"),
+            "PocketLog-aarch64-macos"
+        );
+    }
 
     #[test]
     fn package_copies_binary_dist_and_template_without_overwriting_config() {
@@ -243,7 +255,7 @@ mod tests {
     impl PackageFixture {
         fn new() -> Self {
             let root =
-                std::env::temp_dir().join(format!("qizhang-package-{}", uuid::Uuid::new_v4()));
+                std::env::temp_dir().join(format!("pocket-log-package-{}", uuid::Uuid::new_v4()));
             let input_root = root.join("input");
             let frontend_dist_dir = input_root.join("dist");
             let output = root.join("output");

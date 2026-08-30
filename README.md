@@ -1,4 +1,4 @@
-# 栖账（PocketLog）
+# PocketLog（栖账）
 
 栖账是一个面向个人用户的单用户记账 Web 应用。当前工程已经包含完整的前后端交付物：前端负责总览、收支明细、消费分析、月度报告和分类/账户标签等页面；后端负责 `/api/v1` 接口、PostgreSQL 持久化、演示数据初始化，以及前端静态资源托管。
 
@@ -110,12 +110,12 @@ cargo run --manifest-path backend/Cargo.toml -- package
 
 - 先构建前端生产产物；
 - 再构建 Rust release 可执行文件；
-- 最后输出到 `release/qizhang-<arch>-<os>/`。
+- 最后输出到 `release/PocketLog-<arch>-<os>/`。
 
 当前机器上的输出目录通常类似：
 
 ```text
-release/qizhang-aarch64-macos/
+release/PocketLog-aarch64-macos/
 ```
 
 ## 部署
@@ -125,7 +125,7 @@ release/qizhang-aarch64-macos/
 `package` 生成的发行目录为固定布局：
 
 ```text
-release/qizhang-<arch>-<os>/
+release/PocketLog-<arch>-<os>/
 ├── pocket-log-backend  # Windows 下为 pocket-log-backend.exe
 ├── config.toml
 ├── dist/
@@ -147,7 +147,7 @@ release/qizhang-<arch>-<os>/
 cargo run --manifest-path backend/Cargo.toml -- package
 ```
 
-2. 将 `release/qizhang-<arch>-<os>/` 整个目录部署到目标机器。
+2. 将 `release/PocketLog-<arch>-<os>/` 整个目录部署到目标机器。
 
 3. 编辑发行目录中的 `config.toml`，填写目标环境的数据库地址和监听配置。
 
@@ -204,7 +204,7 @@ retention_days = 14
 后端日志写入可执行文件同级的 `logs/` 目录，文件名格式为：
 
 ```text
-logs/qizhang-YYYY-MM-DD.jsonl
+logs/PocketLog-YYYY-MM-DD.jsonl
 ```
 
 同时，后端也会向控制台输出简洁日志，便于本地运行和部署排障。

@@ -1,6 +1,6 @@
 # Copy this file to config.toml next to the release executable, then set the
 # PostgreSQL database name and credentials appropriate for the deployment.
-database_url = "postgres://qizhang@127.0.0.1:5432/qizhang"
+database_url = "postgres://pocket_log@127.0.0.1:5432/pocket_log"
 bind_addr = "127.0.0.1:3000"
 pool_min = 1
 pool_max = 10

@@ -14,11 +14,11 @@ COPY backend/src ./backend/src
 RUN cargo build --manifest-path backend/Cargo.toml --release
 
 FROM debian:bookworm-slim AS runtime
-RUN useradd --system --create-home --uid 10001 qizhang
+RUN useradd --system --create-home --uid 10001 pocket-log
 WORKDIR /app
 COPY --from=rust-build /src/backend/target/release/pocket-log-backend /usr/local/bin/pocket-log-backend
 COPY --from=frontend-build /src/frontend/dist /app/frontend/dist
-USER qizhang
+USER pocket-log
 ENV FRONTEND_DIST_DIR=/app/frontend/dist
 EXPOSE 3000
 ENTRYPOINT ["pocket-log-backend", "serve"]

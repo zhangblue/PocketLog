@@ -320,13 +320,13 @@ async fn migration_rolls_back_when_delete_fails_after_reference_update() {
     let target = category_id(&db, "购物").await;
     db.db
         .execute_unprepared(
-            "CREATE FUNCTION qizhang_test_fail_category_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced test failure'; END; $$",
+            "CREATE FUNCTION pocket_log_test_fail_category_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced test failure'; END; $$",
         )
         .await
         .unwrap();
     db.db
         .execute_unprepared(
-            "CREATE TRIGGER qizhang_test_fail_category_delete_trigger BEFORE DELETE ON categories FOR EACH ROW WHEN (OLD.name = '餐饮') EXECUTE FUNCTION qizhang_test_fail_category_delete()",
+            "CREATE TRIGGER pocket_log_test_fail_category_delete_trigger BEFORE DELETE ON categories FOR EACH ROW WHEN (OLD.name = '餐饮') EXECUTE FUNCTION pocket_log_test_fail_category_delete()",
         )
         .await
         .unwrap();

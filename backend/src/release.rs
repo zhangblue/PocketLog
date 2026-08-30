@@ -96,15 +96,19 @@ mod tests {
 
     #[test]
     fn layout_uses_executable_parent_instead_of_current_directory() {
-        let layout = ReleaseLayout::from_executable(Path::new("/tmp/qizhang/pocket-log-backend"));
+        let layout =
+            ReleaseLayout::from_executable(Path::new("/tmp/pocket-log/pocket-log-backend"));
 
-        assert_eq!(layout.root, PathBuf::from("/tmp/qizhang"));
+        assert_eq!(layout.root, PathBuf::from("/tmp/pocket-log"));
         assert_eq!(
             layout.config_path,
-            PathBuf::from("/tmp/qizhang/config.toml")
+            PathBuf::from("/tmp/pocket-log/config.toml")
         );
-        assert_eq!(layout.frontend_dist_dir, PathBuf::from("/tmp/qizhang/dist"));
-        assert_eq!(layout.logs_dir, PathBuf::from("/tmp/qizhang/logs"));
+        assert_eq!(
+            layout.frontend_dist_dir,
+            PathBuf::from("/tmp/pocket-log/dist")
+        );
+        assert_eq!(layout.logs_dir, PathBuf::from("/tmp/pocket-log/logs"));
     }
 
     #[test]
@@ -123,7 +127,7 @@ mod tests {
         fs::write(
             &layout.config_path,
             r#"
-database_url = "postgres://user:password@localhost/qizhang"
+database_url = "postgres://user:password@localhost/pocket_log"
 bind_addr = "127.0.0.1:4100"
 pool_min = 2
 pool_max = 8
@@ -155,7 +159,7 @@ retention_days = 21
         let root = temporary_root();
         let layout = ReleaseLayout::from_executable(&root.join("pocket-log-backend"));
         fs::create_dir_all(&root).unwrap();
-        let database_url = "postgres://secret-user:secret-password@localhost/qizhang";
+        let database_url = "postgres://secret-user:secret-password@localhost/pocket_log";
         fs::write(
             &layout.config_path,
             format!("database_url = {database_url:?}\nbind_addr = \"not-an-address\"\n[logging]\n"),
@@ -187,6 +191,6 @@ retention_days = 21
     }
 
     fn temporary_root() -> PathBuf {
-        std::env::temp_dir().join(format!("qizhang-release-{}", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!("pocket-log-release-{}", uuid::Uuid::new_v4()))
     }
 }

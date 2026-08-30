@@ -9,7 +9,7 @@
 `package` 命令生成以下目录，目录名包含当前目标平台：
 
 ```text
-release/qizhang-<target>/
+release/PocketLog-<target>/
 ├── pocket-log-backend          # Windows 为 pocket-log-backend.exe
 ├── config.toml
 ├── dist/
@@ -58,12 +58,12 @@ retention_days = 14
 启动时创建 `logs/`（包含父目录不存在时）。使用 `tracing` 的非阻塞 JSON 格式文件 writer，按本地自然日滚动写入：
 
 ```text
-logs/qizhang-2026-08-28.jsonl
+logs/PocketLog-2026-08-28.jsonl
 ```
 
 每条记录包含时间、级别、目标模块、请求 ID、HTTP 请求 span 与错误码（若有）。控制台同时保留紧凑的文本日志，便于前台启动诊断。
 
-启动完成后和每日滚动前，清理名称匹配 `qizhang-YYYY-MM-DD.jsonl` 且早于 `retention_days` 的日志；不删除未知文件。`retention_days` 必须是正整数。日志目录不可创建、不可写或日志订阅器初始化失败时，程序启动失败，避免无日志运行。
+启动完成后和每日滚动前，清理名称匹配 `PocketLog-YYYY-MM-DD.jsonl` 且早于 `retention_days` 的日志；不删除未知文件。`retention_days` 必须是正整数。日志目录不可创建、不可写或日志订阅器初始化失败时，程序启动失败，避免无日志运行。
 
 ## 实现边界
 

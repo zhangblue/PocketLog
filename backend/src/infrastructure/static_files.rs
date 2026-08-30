@@ -39,7 +39,7 @@ mod tests {
     use uuid::Uuid;
 
     fn temp_dir() -> PathBuf {
-        std::env::temp_dir().join(format!("qizhang-static-{}", Uuid::new_v4()))
+        std::env::temp_dir().join(format!("pocket-log-static-{}", Uuid::new_v4()))
     }
 
     #[test]

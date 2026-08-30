@@ -329,7 +329,7 @@ mod tests {
         fn valid() -> Self {
             Self(vec![(
                 "DATABASE_URL".to_owned(),
-                "postgres://user:password@localhost/qizhang".to_owned(),
+                "postgres://user:password@localhost/pocket_log".to_owned(),
             )])
         }
 
@@ -421,7 +421,7 @@ mod tests {
         let config = Config::from_map(
             ConfigInput::valid()
                 .with("BIND_ADDR", "0.0.0.0:8080")
-                .with("FRONTEND_DIST_DIR", "/srv/qizhang")
+                .with("FRONTEND_DIST_DIR", "/srv/pocket-log")
                 .with("POOL_MIN", "2")
                 .with("POOL_MAX", "20")
                 .with("REQUEST_TIMEOUT_SECS", "30")
@@ -432,7 +432,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.bind_addr.to_string(), "0.0.0.0:8080");
-        assert_eq!(config.frontend_dist_dir, PathBuf::from("/srv/qizhang"));
+        assert_eq!(config.frontend_dist_dir, PathBuf::from("/srv/pocket-log"));
         assert_eq!(config.pool_min, 2);
         assert_eq!(config.pool_max, 20);
         assert_eq!(config.request_timeout, Duration::from_secs(30));
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn redacts_database_url_from_debug_output() {
-        let secret = "postgres://secret-user:secret-password@localhost/qizhang";
+        let secret = "postgres://secret-user:secret-password@localhost/pocket_log";
         let config = Config::from_map(ConfigInput::valid().with("DATABASE_URL", secret)).unwrap();
 
         let debug = format!("{config:?}");
@@ -474,7 +474,7 @@ mod tests {
     fn toml_configuration_uses_file_defaults_and_logging_values() {
         let config = load_toml_config(
             r#"
-database_url = "postgres://user:password@localhost/qizhang"
+database_url = "postgres://user:password@localhost/pocket_log"
 
 [logging]
 level = "debug"
@@ -493,7 +493,7 @@ retention_days = 30
 
     #[test]
     fn invalid_toml_values_use_file_errors_without_credentials() {
-        let database_url = "postgres://secret-user:secret-password@localhost/qizhang";
+        let database_url = "postgres://secret-user:secret-password@localhost/pocket_log";
         let error = load_toml_config(&format!(
             "database_url = {database_url:?}\npool_min = 0\n[logging]\n"
         ))

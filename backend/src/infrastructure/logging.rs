@@ -11,7 +11,7 @@ use thiserror::Error;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-const LOG_PREFIX: &str = "qizhang-";
+const LOG_PREFIX: &str = "PocketLog-";
 const LOG_SUFFIX: &str = ".jsonl";
 
 /// 初始化进程级订阅器，并返回保证非阻塞文件 writer 持续存活到退出的 guard。
@@ -175,15 +175,16 @@ mod tests {
     #[test]
     fn expired_log_selection_ignores_unknown_files() {
         let names = [
+            "PocketLog-2026-08-01.jsonl",
             "qizhang-2026-08-01.jsonl",
             "notes.txt",
-            "qizhang-invalid.jsonl",
+            "PocketLog-invalid.jsonl",
         ];
 
         let expired =
             select_expired_log_names(&names, NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(), 14);
 
-        assert_eq!(expired, vec!["qizhang-2026-08-01.jsonl"]);
+        assert_eq!(expired, vec!["PocketLog-2026-08-01.jsonl"]);
     }
 
     #[test]
@@ -202,9 +203,11 @@ mod tests {
         let root = temporary_directory();
         let logs = root.join("logs");
         fs::create_dir_all(&logs).unwrap();
-        let expired = logs.join("qizhang-2026-08-01.jsonl");
+        let expired = logs.join("PocketLog-2026-08-01.jsonl");
+        let legacy_log = logs.join("qizhang-2026-08-01.jsonl");
         let unknown = logs.join("notes.txt");
         fs::write(&expired, "expired").unwrap();
+        fs::write(&legacy_log, "legacy").unwrap();
         fs::write(&unknown, "keep").unwrap();
         let mut writer = DailyJsonlWriter::new_for_date(
             &logs,
@@ -218,13 +221,14 @@ mod tests {
             .unwrap();
 
         assert!(!expired.exists());
+        assert!(legacy_log.is_file());
         assert!(unknown.is_file());
-        assert!(logs.join("qizhang-2026-08-20.jsonl").is_file());
+        assert!(logs.join("PocketLog-2026-08-20.jsonl").is_file());
         drop(writer);
         fs::remove_dir_all(root).unwrap();
     }
 
     fn temporary_directory() -> PathBuf {
-        std::env::temp_dir().join(format!("qizhang-logging-{}", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!("pocket-log-logging-{}", uuid::Uuid::new_v4()))
     }
 }

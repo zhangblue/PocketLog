@@ -347,7 +347,7 @@ async fn explicit_migrate_is_idempotent() {
 
 - [ ] **步骤 3：运行迁移测试确认失败**
 
-运行：`docker compose -f backend/compose.yaml up -d postgres && TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test migration_test`
+运行：`docker compose -f backend/compose.yaml up -d postgres && TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test migration_test`
 
 预期：FAIL，迁移器和表尚不存在。
 
@@ -379,7 +379,7 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<(), SchemaError>;
 
 - [ ] **步骤 6：运行约束和迁移测试**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test migration_test -- --nocapture`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test migration_test -- --nocapture`
 
 预期：PASS；额外断言非法转账、分类类型错配、零金额、非法偏移和重复规范化名称均被 PostgreSQL 拒绝。
 
@@ -443,7 +443,7 @@ async fn seed_runs_once_and_bootstrap_lists_real_months() {
 
 - [ ] **步骤 3：运行持久化测试确认失败**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test persistence_test seed_runs_once`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test persistence_test seed_runs_once`
 
 预期：FAIL，仓储和种子尚未实现。
 
@@ -469,7 +469,7 @@ pub struct BootstrapSnapshot {
 
 - [ ] **步骤 6：验证种子回滚和空账本语义**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test persistence_test`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test persistence_test`
 
 预期：PASS；测试必须证明用户删除所有交易后重启不会再次写入演示数据。
 
@@ -503,7 +503,7 @@ async fn stale_revision_does_not_write() {
 
 - [ ] **步骤 2：运行目标测试确认失败**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test transactions_test`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test transactions_test`
 
 预期：FAIL，创建用例尚不存在。
 
@@ -528,7 +528,7 @@ pub async fn create(
 
 - [ ] **步骤 5：运行交易创建测试**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test transactions_test repeated_create -- --nocapture`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test transactions_test repeated_create -- --nocapture`
 
 预期：PASS，且覆盖支出、收入、转账、停用标签、类型错配、金额超精度和幂等键冲突。
 
@@ -595,7 +595,7 @@ async fn restore_uses_fixed_server_deadline() {
 
 - [ ] **步骤 5：运行查询与删除矩阵**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test transactions_test`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test transactions_test`
 
 预期：PASS；包含连续删除、错误令牌、过期重试和清理未运行时仍不可见。
 
@@ -627,7 +627,7 @@ async fn cannot_disable_last_active_account() {
 
 - [ ] **步骤 2：运行标签测试确认失败**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test labels_test`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test labels_test`
 
 预期：FAIL，标签应用服务尚不存在。
 
@@ -654,7 +654,7 @@ pub async fn migrate_category(&self, from: CategoryId, to: CategoryId, expected:
 
 - [ ] **步骤 6：运行标签完整测试**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test labels_test`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test labels_test`
 
 预期：PASS，覆盖全局重名、排序重复、漏 ID、跨类型迁移、非启用目标和被引用分类删除。
 
@@ -718,7 +718,7 @@ pub fn build_monthly_report(input: ReportFacts) -> MonthlyReportDto;
 
 - [ ] **步骤 6：运行领域与 PostgreSQL 分析测试**
 
-运行：`TZ=Pacific/Kiritimati cargo test --manifest-path backend/Cargo.toml domain:: && TZ=Pacific/Kiritimati TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test insights_test`
+运行：`TZ=Pacific/Kiritimati cargo test --manifest-path backend/Cargo.toml domain:: && TZ=Pacific/Kiritimati TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test insights_test`
 
 预期：PASS；换成 `TZ=America/Adak` 再运行一次，JSON 快照相同。
 
@@ -761,7 +761,7 @@ async fn api_404_never_returns_index_html() {
 
 - [ ] **步骤 2：运行 Runtime 测试确认失败**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --test runtime_test`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --test runtime_test`
 
 预期：FAIL，Router 尚不存在。
 
@@ -810,7 +810,7 @@ pub async fn serve(config: Config) -> Result<(), StartupError> {
 
 - [ ] **步骤 7：运行全部后端 API 测试**
 
-运行：`TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --tests`
+运行：`TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --tests`
 
 预期：PASS，包含 bootstrap、交易、标签、分析、错误、健康和静态资源。
 
@@ -1030,7 +1030,7 @@ README 给出固定顺序：启动 PostgreSQL → `pocket-log-backend migrate` �
 ```bash
 cargo fmt --manifest-path backend/Cargo.toml --check
 cargo clippy --manifest-path backend/Cargo.toml --all-targets --all-features -- -D warnings
-TEST_DATABASE_URL=postgres://pocketlog:pocketlog@127.0.0.1:5432/pocketlog_test cargo test --manifest-path backend/Cargo.toml --all-features
+TEST_DATABASE_URL=postgres://pocket_log:pocket_log@127.0.0.1:5432/pocket_log_test cargo test --manifest-path backend/Cargo.toml --all-features
 cargo llvm-cov --manifest-path backend/Cargo.toml --lib --all-features --fail-under-lines 90
 cargo build --manifest-path backend/Cargo.toml --release
 ```

@@ -4,6 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use chrono::NaiveDate;
 use pocket_log_backend::application::clock::SystemClock;
 use pocket_log_backend::infrastructure::static_files::ensure_static_assets;
 use pocket_log_backend::infrastructure::{cleanup::spawn_cleanup, seed::seed_if_needed};
@@ -20,7 +21,7 @@ use tower::ServiceExt;
 async fn readiness_requires_migrated_schema_and_never_falls_back_to_html() {
     let _lock = support::test_lock().await;
     let db = support::TestDatabase::migrated().await;
-    let dir = std::env::temp_dir().join(format!("qizhang-runtime-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("pocket-log-runtime-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("index.html"), "ok").unwrap();
     let config = Config::from_map([
@@ -41,7 +42,7 @@ async fn readiness_requires_migrated_schema_and_never_falls_back_to_html() {
 async fn readiness_rejects_unmigrated_schema_without_html_fallback() {
     let _lock = support::test_lock().await;
     let db = support::TestDatabase::empty().await;
-    let dir = std::env::temp_dir().join(format!("qizhang-runtime-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("pocket-log-runtime-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("index.html"), "ok").unwrap();
     let config = Config::from_map([
@@ -107,8 +108,10 @@ async fn seed_failure_rolls_back_all_seed_writes() {
 
 #[test]
 fn serve_rejects_missing_static_directory_before_startup() {
-    let dir =
-        std::env::temp_dir().join(format!("qizhang-runtime-missing-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!(
+        "pocket-log-runtime-missing-{}",
+        uuid::Uuid::new_v4()
+    ));
     let error = ensure_static_assets(&dir).expect_err("missing static assets must fail");
     assert!(matches!(
         error,
@@ -118,8 +121,10 @@ fn serve_rejects_missing_static_directory_before_startup() {
 
 #[test]
 fn serve_rejects_static_directory_without_index() {
-    let dir =
-        std::env::temp_dir().join(format!("qizhang-runtime-no-index-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!(
+        "pocket-log-runtime-no-index-{}",
+        uuid::Uuid::new_v4()
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let error = ensure_static_assets(&dir).expect_err("index.html must be required");
     assert!(matches!(
@@ -133,7 +138,7 @@ fn serve_rejects_static_directory_without_index() {
 async fn serve_rejects_unavailable_database_without_serving() {
     let code = pocket_log_backend::command::entry(
         ["serve"],
-        [("DATABASE_URL", "postgres://127.0.0.1:1/qizhang")],
+        [("DATABASE_URL", "postgres://127.0.0.1:1/pocket_log")],
     )
     .await;
     assert_eq!(code, 1);
@@ -189,12 +194,26 @@ fn binary_uses_environment_configuration_only_when_sibling_config_is_absent() {
     .expect("copy backend binary into temporary release directory");
 
     let output = ProcessCommand::new(release.executable_path())
-        .env("DATABASE_URL", "postgres://127.0.0.1:1/qizhang")
+        .env("DATABASE_URL", "postgres://127.0.0.1:1/pocket_log")
         .output()
         .expect("run temporary release binary");
 
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("startup failed"));
+    let has_dated_pocketlog_log = std::fs::read_dir(release.logs_dir())
+        .expect("read release logs directory")
+        .filter_map(Result::ok)
+        .any(|entry| {
+            let Ok(name) = entry.file_name().into_string() else {
+                return false;
+            };
+            entry.path().is_file()
+                && name
+                    .strip_prefix("PocketLog-")
+                    .and_then(|date| date.strip_suffix(".jsonl"))
+                    .is_some_and(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok())
+        });
+    assert!(has_dated_pocketlog_log);
 }
 
 #[test]
@@ -203,7 +222,7 @@ fn binary_gives_valid_sibling_config_precedence_over_environment() {
     // DATABASE_URL，会在连接前以 config.database_url_invalid 退出，而不是 startup failed。
     let release = support::TemporaryRelease::without_config();
     release.write_config(
-        "database_url = \"postgres://127.0.0.1:1/qizhang\"\nbind_addr = \"127.0.0.1:0\"\n\n[logging]\n",
+        "database_url = \"postgres://127.0.0.1:1/pocket_log\"\nbind_addr = \"127.0.0.1:0\"\n\n[logging]\n",
     );
     std::fs::copy(
         env!("CARGO_BIN_EXE_pocket-log-backend"),
@@ -233,7 +252,7 @@ fn binary_refuses_invalid_sibling_config_instead_of_falling_back_to_environment(
     .expect("copy backend binary into temporary release directory");
 
     let output = ProcessCommand::new(release.executable_path())
-        .env("DATABASE_URL", "postgres://127.0.0.1:1/qizhang")
+        .env("DATABASE_URL", "postgres://127.0.0.1:1/pocket_log")
         .output()
         .expect("run temporary release binary");
 

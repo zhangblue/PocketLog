@@ -30,11 +30,11 @@
 ```rust
 #[test]
 fn layout_uses_executable_parent_instead_of_current_directory() {
-    let layout = ReleaseLayout::from_executable(Path::new("/tmp/qizhang/pocket-log-backend"));
-    assert_eq!(layout.root, PathBuf::from("/tmp/qizhang"));
-    assert_eq!(layout.config_path, PathBuf::from("/tmp/qizhang/config.toml"));
-    assert_eq!(layout.frontend_dist_dir, PathBuf::from("/tmp/qizhang/dist"));
-    assert_eq!(layout.logs_dir, PathBuf::from("/tmp/qizhang/logs"));
+    let layout = ReleaseLayout::from_executable(Path::new("/tmp/pocket-log/pocket-log-backend"));
+    assert_eq!(layout.root, PathBuf::from("/tmp/pocket-log"));
+    assert_eq!(layout.config_path, PathBuf::from("/tmp/pocket-log/config.toml"));
+    assert_eq!(layout.frontend_dist_dir, PathBuf::from("/tmp/pocket-log/dist"));
+    assert_eq!(layout.logs_dir, PathBuf::from("/tmp/pocket-log/logs"));
 }
 
 #[test]
@@ -100,9 +100,9 @@ struct LoggingFileConfig {
 ```rust
 #[test]
 fn expired_log_selection_ignores_unknown_files() {
-    let names = ["qizhang-2026-08-01.jsonl", "notes.txt", "qizhang-invalid.jsonl"];
+    let names = ["PocketLog-2026-08-01.jsonl", "notes.txt", "PocketLog-invalid.jsonl"];
     let expired = select_expired_log_names(names, Date::from_ymd(2026, 8, 20), 14);
-    assert_eq!(expired, vec!["qizhang-2026-08-01.jsonl"]);
+    assert_eq!(expired, vec!["PocketLog-2026-08-01.jsonl"]);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn logging_setup_creates_the_configured_directory() {
 
 - [x] **步骤 3：实现 JSON 日志与保留清理**
 
-引入 `tracing-appender`。实现 `initialize_logging(log_dir, level, retention_days) -> Result<WorkerGuard, LoggingError>`：创建目录、删除过期匹配文件、配置按日滚动的 `qizhang-YYYY-MM-DD.jsonl` 非阻塞 writer，以及保留控制台文本层的 `tracing_subscriber` registry。`WorkerGuard` 必须由 `main` 持有，避免进程退出前丢失缓冲日志。
+引入 `tracing-appender`。实现 `initialize_logging(log_dir, level, retention_days) -> Result<WorkerGuard, LoggingError>`：创建目录、删除过期匹配文件、配置按日滚动的 `PocketLog-YYYY-MM-DD.jsonl` 非阻塞 writer，以及保留控制台文本层的 `tracing_subscriber` registry。`WorkerGuard` 必须由 `main` 持有，避免进程退出前丢失缓冲日志。
 
 - [x] **步骤 4：接入启动并验证**
 
@@ -259,6 +259,6 @@ npm --prefix frontend run build
 #### 任务 5 实际验证记录（2026-08-28）
 
 - 新增二进制级回归 `binary_gives_valid_sibling_config_precedence_over_environment`：同级的有效 TOML 使用不可连接的本地地址，环境变量使用格式无效的地址，断言进程走同级配置并以 `startup failed` 退出。为确认该测试能捕获回归，临时将入口改为强制读取环境变量，测试按预期由退出码 `1` 变为 `2` 而失败；恢复既有最小优先级分支后再次通过。
-- 执行 `cargo run --manifest-path backend/Cargo.toml -- package` 成功，生成 `release/qizhang-aarch64-macos/`。检查确认其中存在可执行文件、`config.toml`、`dist/index.html` 和 `logs/`。在隔离复制目录写入测试配置后，先显式运行同级可执行文件的 `migrate`，再无参数启动它；启动阶段只发生 schema 只读校验、seed/cleanup 与绑定，未执行迁移。运行时测试中 `serve_refuses_an_unmigrated_release_schema_without_migrating_it` 也验证未迁移 schema 会被 `serve` 拒绝且不被改写。
+- 执行 `cargo run --manifest-path backend/Cargo.toml -- package` 成功，生成 `release/PocketLog-aarch64-macos/`。检查确认其中存在可执行文件、`config.toml`、`dist/index.html` 和 `logs/`。在隔离复制目录写入测试配置后，先显式运行同级可执行文件的 `migrate`，再无参数启动它；启动阶段只发生 schema 只读校验、seed/cleanup 与绑定，未执行迁移。运行时测试中 `serve_refuses_an_unmigrated_release_schema_without_migrating_it` 也验证未迁移 schema 会被 `serve` 拒绝且不被改写。
 - 使用 Chrome DevTools MCP 访问同源发行服务：根路径渲染“栖账”总览，`/api/v1/bootstrap` 返回 `application/json` 的账本数据；同级 `logs/` 生成当日 JSONL 文件并含 79 行。验收服务通过 Ctrl-C 正常结束。
 - 门禁均退出 `0`：`cargo fmt --manifest-path backend/Cargo.toml --check`；`cargo clippy --manifest-path backend/Cargo.toml --all-targets --all-features -- -D warnings`；`TEST_DATABASE_URL=<local-test-database> cargo test --manifest-path backend/Cargo.toml --all-features`（138 个 Rust 测试通过）；`cargo build --manifest-path backend/Cargo.toml --release`；`npm --prefix frontend run check`（17 个文件、193 个测试通过）；`npm --prefix frontend run coverage`（`src/app` 逐文件行覆盖率最低 90.20%，`src/domain` 为 99.19%）；`npm --prefix frontend run build`。

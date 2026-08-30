@@ -19,7 +19,7 @@ async fn app_with_limits(body_limit: usize, timeout_secs: u64) -> (Router, suppo
     seed_if_needed(&database.db, &SystemClock)
         .await
         .expect("seed");
-    let dir = std::env::temp_dir().join(format!("qizhang-api-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("pocket-log-api-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("assets dir");
     std::fs::write(dir.join("index.html"), "<html>ok</html>").expect("index");
     std::fs::write(dir.join("app-0123abcd.js"), "console.log(1)").expect("asset");

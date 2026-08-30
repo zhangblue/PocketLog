@@ -4,7 +4,7 @@ describe('全局测试清理', () => {
   it('故意污染滚动、全局和环境', () => {
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 160 })
     vi.stubGlobal('print', undefined)
-    vi.stubEnv('QIZHANG_ISOLATION', 'dirty')
+    vi.stubEnv('POCKET_LOG_ISOLATION', 'dirty')
     localStorage.setItem('dirty', 'value')
   })
 
@@ -12,7 +12,7 @@ describe('全局测试清理', () => {
     expect(window.scrollY).toBe(0)
     expect(vi.isMockFunction(window.scrollTo)).toBe(true)
     expect(window.print).not.toBeUndefined()
-    expect(process.env.QIZHANG_ISOLATION).toBeUndefined()
+    expect(process.env.POCKET_LOG_ISOLATION).toBeUndefined()
     expect(localStorage.getItem('dirty')).toBeNull()
   })
 })
