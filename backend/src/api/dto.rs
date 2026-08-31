@@ -27,6 +27,17 @@ pub struct CreateTransactionRequest {
     #[serde(default)]
     pub note: String,
 }
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelPatch {
+    /// 分类与账户共用的可选名称；缺失时由路由保留现有值，而不是写入空字符串。
+    pub name: Option<String>,
+    /// Emoji 仅适用于分类 PATCH。保留在协议 DTO 中可避免路由遗漏客户端传入的字段。
+    pub emoji: Option<String>,
+    /// 启停是独立的生命周期命令，路由必须优先将它分派到专用服务分支。
+    pub active: Option<bool>,
+}
 impl CreateTransactionRequest {
     pub fn into_domain(self) -> CreateTransaction {
         // 缺失备注归一为空字符串，后续应用层统一 trim/长度校验，避免 Option 在写入链路中分叉。
@@ -107,6 +118,7 @@ pub struct BootstrapResponse {
     pub months: Vec<String>,
     pub data_revision: DataRevision,
     pub server_time: String,
+    pub custom_icons: Vec<String>,
 }
 impl From<BootstrapSnapshot> for BootstrapResponse {
     fn from(v: BootstrapSnapshot) -> Self {
@@ -116,6 +128,7 @@ impl From<BootstrapSnapshot> for BootstrapResponse {
             months: v.months,
             data_revision: v.data_revision,
             server_time: v.server_time,
+            custom_icons: v.custom_icons,
         }
     }
 }

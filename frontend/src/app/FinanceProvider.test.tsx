@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { FinanceApiError } from '../api/types'
 import { sampleTransactions } from '../domain/sampleData'
 import type { Transaction } from '../domain/types'
 import { click, render } from '../test/render'
@@ -61,9 +62,12 @@ function LabelsProbe() {
   return (
     <>
       <output data-testid="categories">{state.categories.map(item => `${item.id}:${item.name}:${item.active}`).join(',')}</output>
+      <output data-testid="category-details">{state.categories.map(item => `${item.id}:${item.name}:${item.emoji}:${item.color}:${item.active}`).join(',')}</output>
+      <output data-testid="category-revision">{state.dataRevision}</output>
       <output data-testid="label-transactions">{state.transactions.map(item => item.categoryId).join(',')}</output>
       <output data-testid="label-result">{result}</output>
       <button type="button" onClick={() => void Promise.resolve(actions.renameCategory('food', '餐厅')).then(value => setResult(JSON.stringify(value)))}>重命名分类</button>
+      <button type="button" onClick={() => void Promise.resolve(actions.updateCategory('food', { name: '美食', emoji: '🪐' })).then(value => setResult(JSON.stringify(value)))}>更新分类</button>
       <button type="button" onClick={() => void Promise.resolve(actions.migrateCategory('food', 'transport')).then(value => setResult(JSON.stringify(value)))}>迁移分类</button>
     </>
   )
@@ -79,10 +83,17 @@ function ManagementProbe() {
       <output data-testid="management-result">{result}</output>
       <button type="button" onClick={() => void Promise.resolve(actions.createCategory({ name: '  新增分类  ', kind: 'expense', emoji: '🍚', color: '#123456' })).then(value => setResult(JSON.stringify(value)))}>创建分类</button>
       <button type="button" onClick={() => void Promise.resolve(actions.deactivateCategory('entertainment')).then(value => setResult(JSON.stringify(value)))}>停用分类</button>
+      <button type="button" onClick={() => void Promise.resolve(actions.activateCategory('entertainment')).then(value => setResult(JSON.stringify(value)))}>启用分类</button>
       <button type="button" onClick={() => void Promise.resolve(actions.reorderCategories([...state.categories].map(item => item.id).reverse())).then(value => setResult(JSON.stringify(value)))}>排序分类</button>
       <button type="button" onClick={() => void Promise.resolve(actions.createAccount('  旅行钱包  ')).then(value => setResult(JSON.stringify(value)))}>创建账户</button>
     </>
   )
+}
+
+function CategoryErrorProbe() {
+  const { actions } = useFinance()
+  const [result, setResult] = useState('')
+  return <><output data-testid="category-error-result">{result}</output><button type="button" onClick={() => void Promise.resolve(actions.createCategory({ name: '过长分类', kind: 'expense' })).then(value => setResult(JSON.stringify(value)))}>创建无效分类</button></>
 }
 
 describe('FinanceProvider', () => {
@@ -219,6 +230,40 @@ describe('FinanceProvider', () => {
     expect(container.querySelector('[data-testid="categories"]')?.textContent).toContain('food:餐厅:true')
   })
 
+  it('将分类名称长度错误映射为友好提示', async () => {
+    const api = createFixtureApi()
+    vi.spyOn(api, 'createCategory').mockRejectedValue(new FinanceApiError({ code: 'label.name_length_invalid', title: '校验失败', detail: 'label.name_length_invalid', fieldErrors: [], requestId: '', retryable: false }, 422))
+    const { container } = await render(<FinanceProvider api={api}><CategoryErrorProbe /></FinanceProvider>)
+
+    await click(container.querySelector('button')!)
+
+    expect(container.querySelector('[data-testid="category-error-result"]')?.textContent).toBe('{"ok":false,"message":"分类名称长度不符合要求"}')
+  })
+
+  it('更新分类时以 API 返回的完整分类和 dataRevision 替换本地状态', async () => {
+    const api = createFixtureApi()
+    vi.spyOn(api, 'patchCategory').mockResolvedValue({ data: { id: 'food', name: '美食', emoji: '🪐', color: '#765432', kind: 'expense', active: false, semanticKey: 'food', sortOrder: 9 }, dataRevision: 42 })
+    const { container } = await render(<FinanceProvider api={api}><LabelsProbe /></FinanceProvider>)
+
+    await click(container.querySelectorAll('button')[1])
+
+    expect(container.querySelector('[data-testid="label-result"]')?.textContent).toBe('{"ok":true}')
+    expect(container.querySelector('[data-testid="category-details"]')?.textContent).toContain('food:美食:🪐:#765432:false')
+    expect(container.querySelector('[data-testid="category-revision"]')?.textContent).toBe('42')
+  })
+
+  it('更新分类请求失败时不污染现有分类状态', async () => {
+    const api = createFixtureApi()
+    vi.spyOn(api, 'patchCategory').mockRejectedValue(new Error('标签保存失败，请重试。'))
+    const { container } = await render(<FinanceProvider api={api}><LabelsProbe /></FinanceProvider>)
+    const before = container.querySelector('[data-testid="categories"]')?.textContent
+
+    await click(container.querySelectorAll('button')[1])
+
+    expect(container.querySelector('[data-testid="label-result"]')?.textContent).toBe('{"ok":false,"message":"标签保存失败，请重试。"}')
+    expect(container.querySelector('[data-testid="categories"]')?.textContent).toBe(before)
+  })
+
   it('迁移标签保存失败时回滚交易且不更新界面', async () => {
     const { container } = await render(
       <FinanceProvider api={createFixtureApi({ fail: { label: true } })}><LabelsProbe /></FinanceProvider>,
@@ -226,16 +271,18 @@ describe('FinanceProvider', () => {
     const beforeTransactions = container.querySelector('[data-testid="label-transactions"]')?.textContent
     const beforeCategories = container.querySelector('[data-testid="categories"]')?.textContent
 
-    await click(container.querySelectorAll('button')[1])
+    await click(container.querySelectorAll('button')[2])
 
     expect(container.querySelector('[data-testid="label-result"]')?.textContent).toContain('迁移尚未完成')
     expect(container.querySelector('[data-testid="label-transactions"]')?.textContent).toBe(beforeTransactions)
     expect(container.querySelector('[data-testid="categories"]')?.textContent).toBe(beforeCategories)
   })
 
-  it('通过 Provider 创建、停用和排序分类，并创建账户后更新真实标签状态', async () => {
-    const { container } = await render(<FinanceProvider api={createFixtureApi()}><ManagementProbe /></FinanceProvider>)
-    const [createCategory, deactivateCategory, reorderCategories, createAccount] = container.querySelectorAll('button')
+  it('通过 Provider 创建、停用、启用和排序分类，并创建账户后更新真实标签状态', async () => {
+    const api = createFixtureApi()
+    const patchCategory = vi.spyOn(api, 'patchCategory')
+    const { container } = await render(<FinanceProvider api={api}><ManagementProbe /></FinanceProvider>)
+    const [createCategory, deactivateCategory, activateCategory, reorderCategories, createAccount] = container.querySelectorAll('button')
 
     await click(createCategory)
     expect(container.querySelector('[data-testid="management-result"]')?.textContent).toBe('{"ok":true}')
@@ -243,6 +290,11 @@ describe('FinanceProvider', () => {
 
     await click(deactivateCategory)
     expect(container.querySelector('[data-testid="management-categories"]')?.textContent).toContain('entertainment:娱乐:false')
+
+    await click(activateCategory)
+    expect(container.querySelector('[data-testid="management-result"]')?.textContent).toBe('{"ok":true}')
+    expect(container.querySelector('[data-testid="management-categories"]')?.textContent).toContain('entertainment:娱乐:true')
+    expect(patchCategory).toHaveBeenCalledWith('entertainment', { active: true }, expect.any(Number))
 
     const firstBeforeReorder = container.querySelector('[data-testid="management-categories"]')?.textContent?.split(',')[0]
     await click(reorderCategories)

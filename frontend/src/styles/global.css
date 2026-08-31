@@ -355,6 +355,29 @@ textarea:focus-visible {
   stroke-width: 4;
 }
 
+.trend-figure svg text {
+  fill: var(--color-muted);
+  font-size: 10px;
+}
+
+.trend-point {
+  fill: var(--color-card);
+  stroke: var(--color-green);
+  stroke-width: 3;
+  cursor: pointer;
+}
+
+.trend-point:focus-visible {
+  outline: none;
+  stroke: var(--color-ink);
+  stroke-width: 4;
+}
+
+[data-overview-trend-tooltip] {
+  fill: var(--color-ink) !important;
+  font-weight: 650;
+}
+
 .trend-figure figcaption {
   margin-top: 7px;
   font-size: 10px;
@@ -545,11 +568,48 @@ textarea:focus-visible {
 .label-create-form {
   display: flex;
   align-items: end;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 14px;
   border: 1px solid var(--color-line);
   border-radius: 14px;
   background: var(--color-card);
+}
+
+.custom-icon-library {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  background: var(--color-card);
+}
+
+.custom-icon-library label {
+  display: grid;
+  gap: 6px;
+  color: #58645f;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.custom-icon-library input {
+  height: 35px;
+  min-width: 150px;
+  padding: 0 10px;
+  border: 1px solid #d9ddd6;
+  border-radius: 8px;
+}
+
+.custom-icon-list {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 35px;
+  font-size: 20px;
 }
 
 .label-create-form label,
@@ -575,14 +635,32 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
-.label-create-form button,
+/* Emoji 固定选择器保留浏览器原生箭头，只压缩控件本身的横向空间。 */
+.label-icon-select {
+  width: 44px;
+  min-width: 44px !important;
+  padding: 0 4px !important;
+}
+
+.category-edit-fields {
+  display: flex;
+  gap: 6px;
+}
+
+.category-edit-fields input {
+  min-width: 0;
+}
+
+.label-form-submit,
 .label-dialog-actions button {
   min-height: 35px;
+  min-width: max-content;
   padding: 0 12px;
   border-radius: 8px;
   background: var(--color-ink);
   color: #fff;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .label-list {

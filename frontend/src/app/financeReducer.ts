@@ -43,6 +43,7 @@ export interface FinanceState {
   transactions: Transaction[]
   categories: Category[]
   accounts: AccountLabel[]
+  customIcons: string[]
   drawerOpen: boolean
   analytics: AnalyticsContext
   deletedTransaction?: Transaction
@@ -75,6 +76,7 @@ export function createInitialFinanceState(now = new Date()): FinanceState {
   transactions: sampleTransactions,
   categories: sampleCategories,
   accounts: sampleAccounts,
+  customIcons: [],
   drawerOpen: false,
   analytics: { range: 'month', ...monthBounds(month), scrollTop: 0, scrollRestorePending: false },
     dataStatus: 'loading',
@@ -123,8 +125,9 @@ export type FinanceAction =
   | { type: 'data/load-succeeded'; transactions: Transaction[]; categories: Category[]; accounts: AccountLabel[] }
   | { type: 'data/load-failed'; message: string; transactions: Transaction[]; categories: Category[]; accounts: AccountLabel[] }
   | { type: 'bootstrap/loading'; sequence: number }
-  | { type: 'bootstrap/succeeded'; sequence: number; value: BootstrapResponse; categories: Category[]; accounts: AccountLabel[]; dataRevision: number }
+  | { type: 'bootstrap/succeeded'; sequence: number; value: BootstrapResponse; categories: Category[]; accounts: AccountLabel[]; customIcons: string[]; dataRevision: number }
   | { type: 'bootstrap/failed'; sequence: number; message: string }
+  | { type: 'custom-icon/created'; emoji: string; dataRevision: number }
   | { type: 'transactions/request-loading'; sequence: number }
   | { type: 'transactions/load-more-started' }
   | { type: 'transactions/request-succeeded'; sequence: number; value: TransactionsResponse; transactions: Transaction[]; dataRevision: number }
@@ -153,11 +156,15 @@ export function financeReducer(state: FinanceState, action: FinanceAction): Fina
   if (action.type === 'bootstrap/loading') return { ...state, bootstrap: { status: 'loading' }, requestSequence: { ...state.requestSequence, bootstrap: action.sequence }, dataStatus: 'loading', dataError: undefined }
   if (action.type === 'bootstrap/succeeded') {
     if (state.requestSequence.bootstrap !== action.sequence || action.dataRevision < state.dataRevision) return state
-    return { ...state, bootstrap: { status: 'ready', value: action.value }, categories: action.categories, accounts: action.accounts, dataRevision: action.dataRevision, dataStatus: 'ready', dataError: undefined }
+    return { ...state, bootstrap: { status: 'ready', value: action.value }, categories: action.categories, accounts: action.accounts, customIcons: action.customIcons, dataRevision: action.dataRevision, dataStatus: 'ready', dataError: undefined }
   }
   if (action.type === 'bootstrap/failed') {
     if (state.requestSequence.bootstrap !== action.sequence) return state
     return { ...state, bootstrap: { status: 'error', error: action.message }, dataStatus: 'error', dataError: action.message }
+  }
+  if (action.type === 'custom-icon/created') {
+    if (action.dataRevision < state.dataRevision) return state
+    return { ...state, customIcons: state.customIcons.includes(action.emoji) ? state.customIcons : [...state.customIcons, action.emoji], dataRevision: action.dataRevision, refreshGeneration: state.refreshGeneration + 1 }
   }
   if (action.type === 'transactions/request-loading') return { ...state, transactionsRequest: { ...state.transactionsRequest, status: 'loading', error: undefined }, transactionCursor: null, transactionsLoadingMore: false, requestSequence: { ...state.requestSequence, transactions: action.sequence } }
   if (action.type === 'transactions/load-more-started') return { ...state, transactionsLoadingMore: true, transactionsRequest: { ...state.transactionsRequest, error: undefined } }

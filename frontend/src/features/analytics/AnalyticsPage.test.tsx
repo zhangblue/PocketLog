@@ -37,7 +37,7 @@ describe('AnalyticsPage', () => {
     expect(container.querySelector('svg title')?.textContent).toBe('支出趋势')
     expect(container.querySelector('svg desc')?.textContent).toContain('2026-08-02')
     expect(container.querySelector('[data-trend-column="2026-08-02"]')?.getAttribute('aria-label')).toContain('¥1,050')
-    expect(container.querySelector('figcaption')?.textContent).toContain('2026-08-02')
+    expect(container.querySelector('.analytics-trend-panel figcaption')).toBeNull()
 
     await click(container.querySelector<SVGRectElement>('[data-trend-column="2026-08-02"]')! as unknown as HTMLElement)
 
@@ -67,9 +67,7 @@ describe('AnalyticsPage', () => {
   it('为支出趋势提供自适应坐标，并在悬停或聚焦柱子时显示精确金额', async () => {
     const { container } = await render(<App initialView="analytics" />)
 
-    const axisLabels = container.querySelectorAll('[data-trend-axis-label]')
-    expect(axisLabels.length).toBeLessThanOrEqual(6)
-    expect(axisLabels[0]?.textContent).toContain('08-02')
+    expect(container.querySelectorAll('[data-trend-axis-label]')).toHaveLength(0)
     const yAxisLabels = [...container.querySelectorAll('[data-trend-y-axis-label]')].map(label => label.textContent)
     expect(yAxisLabels).toHaveLength(4)
     expect(yAxisLabels).toContain('¥0')
@@ -90,7 +88,7 @@ describe('AnalyticsPage', () => {
     expect(container.querySelector('[data-trend-tooltip]')).toBeNull()
   })
 
-  it('在超过六个日期时保留趋势横轴的首尾日期', async () => {
+  it('在日期较多时不显示趋势底部日期标签', async () => {
     const transactions: Transaction[] = Array.from({ length: 8 }, (_, index) => ({
       id: `daily-expense-${index + 1}`,
       kind: 'expense' as const,
@@ -103,9 +101,8 @@ describe('AnalyticsPage', () => {
     }))
     const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
-    const axisLabels = [...container.querySelectorAll('[data-trend-axis-label]')].map(label => label.textContent)
-    expect(axisLabels).toHaveLength(6)
-    expect(axisLabels).toEqual(['08-01', '08-02', '08-04', '08-05', '08-07', '08-08'])
+    expect(container.querySelectorAll('[data-trend-axis-label]')).toHaveLength(0)
+    expect(container.querySelector('.analytics-trend-panel figcaption')).toBeNull()
   })
 
   it('为补齐的零支出日期保留可悬停的趋势命中区域', async () => {

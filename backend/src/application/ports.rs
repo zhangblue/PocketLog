@@ -79,6 +79,13 @@ pub trait LedgerTransaction: Send {
         id: uuid::Uuid,
         name: String,
     ) -> Result<CategoryDto, AppError>;
+    /// 在当前写事务中只覆盖调用方提供的分类字段；实现负责保持名称规范化和唯一性约束。
+    async fn update_category(
+        &mut self,
+        id: uuid::Uuid,
+        name: Option<String>,
+        emoji: Option<String>,
+    ) -> Result<CategoryDto, AppError>;
     async fn set_category_active(
         &mut self,
         id: uuid::Uuid,
@@ -101,4 +108,5 @@ pub trait LedgerTransaction: Send {
         id: uuid::Uuid,
         active: bool,
     ) -> Result<AccountDto, AppError>;
+    async fn insert_custom_icon(&mut self, emoji: String) -> Result<String, AppError>;
 }

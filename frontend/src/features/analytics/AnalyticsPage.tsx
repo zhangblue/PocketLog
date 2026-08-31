@@ -5,7 +5,6 @@ import { AsyncPanel } from '../../components/AsyncPanel'
 import { daysInMonth, formatCurrency, isValidCalendarDate, previousMonth } from '../../domain/selectors'
 import type { TransactionFilter } from '../../domain/types'
 
-const MAX_X_AXIS_LABELS = 6
 const TREND_Y_AXIS_TICKS = 4
 const TREND_CHART_LEFT = 56
 const TREND_CHART_TOP = 18
@@ -43,14 +42,6 @@ function activate(event: React.KeyboardEvent<Element>, action: () => void) {
   }
 }
 
-/** 返回横轴需要显示文字的趋势索引；数据点始终完整保留，只压缩文字刻度。 */
-function trendAxisIndexes(length: number) {
-  if (length <= MAX_X_AXIS_LABELS) return Array.from({ length }, (_, index) => index)
-  return Array.from({ length: MAX_X_AXIS_LABELS }, (_, slot) =>
-    Math.round(slot * (length - 1) / (MAX_X_AXIS_LABELS - 1)),
-  )
-}
-
 /** 将最大支出向上取整到易读量级，避免图表最高柱贴住边界。 */
 function trendScaleMax(maximum: number) {
   if (maximum <= 0) return 1
@@ -80,7 +71,6 @@ export function AnalyticsPage() {
   const displayInsights = state.analyticsState.value?.insights.map(item => ({ id: item.id, title: item.title, detail: item.detail, tone: item.tone, filter: item.drilldown?.currentFilter ?? { month: state.month, sourceLabel: item.title } })) ?? []
   const maxTrend = Math.max(...trend.map(item => item.amount), 0)
   const trendScale = trendScaleMax(maxTrend)
-  const trendAxisLabelIndexes = trendAxisIndexes(trend.length)
   const trendYTicks = Array.from({ length: TREND_Y_AXIS_TICKS }, (_, index) => trendScale * (TREND_Y_AXIS_TICKS - index - 1) / (TREND_Y_AXIS_TICKS - 1))
   const trendTitleId = useId()
   const trendDescriptionId = useId()
@@ -222,11 +212,6 @@ export function AnalyticsPage() {
                     </g>
                   )
                 })}
-                {trendAxisLabelIndexes.map(index => {
-                  const item = trend[index]
-                  const slotWidth = TREND_CHART_WIDTH / Math.max(trend.length, 1)
-                  return <text key={item.date} data-trend-axis-label className="analytics-trend-axis-label" x={TREND_CHART_LEFT + index * slotWidth + slotWidth / 2} y={174} textAnchor="middle">{item.date.slice(5)}</text>
-                })}
                 {trendTooltip && (() => {
                   const slotWidth = TREND_CHART_WIDTH / Math.max(trend.length, 1)
                   const tooltipX = Math.min(Math.max(TREND_CHART_LEFT + trendTooltip.index * slotWidth + slotWidth / 2, 86), 514)
@@ -239,7 +224,6 @@ export function AnalyticsPage() {
                   )
                 })()}
               </svg>
-              <figcaption>{trend.map(item => `${item.date} ${formatCurrency(item.amount)}`).join('；')}</figcaption>
             </figure>
           </AsyncPanel>
         <section className="panel analytics-panel" aria-labelledby="analytics-category-title"><div className="panel-head"><div><h2 id="analytics-category-title">分类构成</h2><p>选择分类查看对应交易</p></div></div><div className="analytics-category-list" aria-label="分类构成">{normalizedBreakdown.map(item => { const category = state.categories.find(candidate => candidate.id === item.categoryId); const label = `${category?.name ?? item.categoryId}支出构成`; return <button key={item.categoryId} type="button" data-category-share={item.categoryId} onClick={() => openDetail({ categoryId: item.categoryId }, label)} onKeyDown={event => activate(event, () => openDetail({ categoryId: item.categoryId }, label))}><span>{category?.name ?? item.categoryId}</span><strong>{formatCurrency(item.amount)}</strong><small>{Math.round(item.ratio * 100)}%</small></button> })}</div></section>

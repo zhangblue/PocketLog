@@ -68,6 +68,31 @@ describe('FinanceApi', () => {
     expect(response.insights[0].drilldown?.currentFilter.dateFrom).toBe('2026-08-01')
   })
 
+  it('maps a single backend kind in insight drilldown to the singular filter', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      data: {
+        summary: { expense: '0', income: '0', transfer: '0', balance: '0', daily_expense: '0', transaction_count: 0 },
+        trend: [], composition: [], category_changes: [],
+      },
+      insights: [{
+        code: 'transport_weekend', title: '周末交通支出偏高', description: '...', source_label: '周末交通支出偏高',
+        current_filter: { start: '2026-08-01', end: '2026-08-31', category_id: 'transport', account_id: null, weekend_only: true, kinds: ['expense'] },
+        previous_filter: null, included_category_ids: null,
+      }],
+      dataRevision: 1,
+    }))
+    const api = createFinanceApi({ fetch: fetchMock })
+
+    const response = await api.overview({ month: '2026-08' })
+
+    expect(response.insights[0].drilldown?.currentFilter).toMatchObject({
+      kind: 'expense',
+      kinds: undefined,
+      weekendOnly: true,
+      categoryId: 'transport',
+    })
+  })
+
   it('maps snake_case transactions and label mutation responses', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ items: [{ id: 't-1', kind: 'expense', amount: '0.10', merchant: '小额', category_id: 'c-1', account_id: 'a-1', occurred_at: '2026-08-27T10:02:03+08:00', note: '' }], next_cursor: null, data_revision: 2 }))

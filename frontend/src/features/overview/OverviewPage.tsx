@@ -44,7 +44,7 @@ export function OverviewPage() {
   const breakdown = apiData?.composition.map(item => ({ categoryId: item.categoryId ?? 'other', amount: Number(item.amount), ratio: 0 })) ?? []
   const breakdownTotal = breakdown.reduce((sum, item) => sum + item.amount, 0)
   const normalizedBreakdown = breakdown.map(item => ({ ...item, ratio: breakdownTotal ? item.amount / breakdownTotal : 0 }))
-  const weeklyTrend = apiData?.trend.map((item, index) => ({ week: index + 1, amount: Number(item.amount) })) ?? []
+  const dailyTrend = apiData?.trend.map(item => ({ date: item.date, amount: Number(item.amount) })) ?? []
   const priorMonth = previousMonth(state.month)
   const previousSummary = state.overview.value?.previousSummary
     ? { expense: Number(state.overview.value.previousSummary.expense), income: Number(state.overview.value.previousSummary.income), savingsRate: Number(state.overview.value.previousSummary.savingsRate ?? 0), transactionCount: state.overview.value.previousSummary.transactionCount }
@@ -52,12 +52,7 @@ export function OverviewPage() {
   const currentDays = daysInMonth(state.month)
   const previousDays = daysInMonth(priorMonth)
   const insights = state.overview.value?.insights.map(item => ({ id: item.id, title: item.title, detail: item.detail, tone: item.tone, filter: item.drilldown?.currentFilter ?? { month: state.month, sourceLabel: item.title } })) ?? []
-  const maxTrend = Math.max(...weeklyTrend.map(item => item.amount), 1)
-  const trendPoints = weeklyTrend.map((item, index) => ({
-    x: 40 + index * 130,
-    y: 180 - (item.amount / maxTrend) * 130,
-  }))
-  const trendSummary = weeklyTrend.map(item => `第 ${item.week} 周 ${formatSummaryMoney(item.amount)}`).join('；')
+  const trendSummary = dailyTrend.map(item => `${item.date} ${formatSummaryMoney(item.amount)}`).join('；')
   const isFirstUse = summary.transactionCount === 0
   const hasPrevious = previousSummary.transactionCount > 0
   const compare = (current: number, previous: number, unit = '%') => {
@@ -91,8 +86,8 @@ export function OverviewPage() {
 
       <section className="overview-grid" aria-label="消费洞察">
         <AsyncPanel className="panel trend-panel" headingLevel={2} title="支出趋势" status={state.overview.status === 'idle' ? 'ready' : state.overview.status} onRetry={() => actions.retryDataLoad('overview')}>
-          <p className="panel-description">按周观察消费节奏</p>
-          <TrendChart points={trendPoints} summary={trendSummary} />
+          <p className="panel-description">按日观察消费节奏</p>
+          <TrendChart points={dailyTrend} summary={trendSummary} />
         </AsyncPanel>
         <section className="panel category-panel" aria-labelledby="category-heading">
           <div className="panel-head"><div><h2 id="category-heading">支出构成</h2><p>点击分类查看明细</p></div></div>

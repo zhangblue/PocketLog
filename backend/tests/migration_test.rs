@@ -23,7 +23,7 @@ async fn explicit_migrate_is_idempotent() {
     run_migrations(&test_db.db).await.unwrap();
     verify_schema(&test_db.db).await.unwrap();
 
-    assert_eq!(migration_versions(&test_db.db).await.len(), 1);
+    assert_eq!(migration_versions(&test_db.db).await.len(), 2);
     test_db.cleanup().await;
 }
 
@@ -68,6 +68,7 @@ async fn migration_creates_ledger_tables_indexes_and_initial_state() {
             "account_labels",
             "app_state",
             "categories",
+            "custom_icons",
             "idempotency_requests",
             "transactions",
         ]

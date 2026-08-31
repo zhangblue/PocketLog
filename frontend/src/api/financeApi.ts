@@ -32,12 +32,13 @@ export interface FinanceApiOptions {
 
 export interface FinanceApi {
   bootstrap(options?: RequestOptions): Promise<BootstrapResponse>
+  createCustomIcon(emoji: string, revision: number, options?: RequestOptions): Promise<Mutation<string>>
   listTransactions(filter?: Partial<TransactionFilter> & { cursor?: string; limit?: number }, options?: RequestOptions): Promise<TransactionsResponse>
   createTransaction(input: CreateTransactionInput, options: MutationOptions): Promise<Mutation<TransactionDto>>
   deleteTransaction(id: string, revision: number, options?: RequestOptions): Promise<Mutation<{ transaction: TransactionDto; deletionToken: string; undoUntil: string }>>
   restoreTransaction(id: string, deletionToken: string, revision: number, options?: RequestOptions): Promise<Mutation<TransactionDto>>
   createCategory(input: Record<string, unknown>, revision: number, options?: RequestOptions): Promise<Mutation<CategoryDto>>
-  patchCategory(id: string, input: { name?: string; active?: boolean }, revision: number, options?: RequestOptions): Promise<Mutation<CategoryDto>>
+  patchCategory(id: string, input: { name?: string; emoji?: string; active?: boolean }, revision: number, options?: RequestOptions): Promise<Mutation<CategoryDto>>
   deactivateCategory(id: string, revision: number, options?: RequestOptions): Promise<Mutation<CategoryDto>>
   deleteCategory(id: string, revision: number, options?: RequestOptions): Promise<Mutation<unknown>>
   migrateCategory(id: string, toCategoryId: string, revision: number, options?: RequestOptions): Promise<Mutation<unknown>>
@@ -156,7 +157,9 @@ export function createFinanceApi(options: FinanceApiOptions = {}): FinanceApi {
     const start = String(raw.start ?? raw.dateFrom ?? (month ? `${month}-01` : ''))
     const end = String(raw.end ?? raw.dateTo ?? (month ? `${month}-${new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).getUTCDate()}` : ''))
     const kinds = raw.kinds as TransactionFilter['kinds'] | undefined
-    return { month: start.slice(0, 7), dateFrom: start || undefined, dateTo: end || undefined, categoryId: text(raw.category_id ?? raw.categoryId), accountId: text(raw.account_id ?? raw.accountId), weekendOnly: Boolean(raw.weekend_only ?? raw.weekendOnly), kinds: kinds?.length ? kinds : undefined, kind: raw.kind as TransactionFilter['kind'], sourceLabel: text(raw.source_label ?? raw.sourceLabel) }
+    const kind = raw.kind as TransactionFilter['kind'] | undefined
+    const singleKind = kinds?.length === 1 ? kinds[0] : undefined
+    return { month: start.slice(0, 7), dateFrom: start || undefined, dateTo: end || undefined, categoryId: text(raw.category_id ?? raw.categoryId), accountId: text(raw.account_id ?? raw.accountId), weekendOnly: Boolean(raw.weekend_only ?? raw.weekendOnly), kinds: kinds && kinds.length > 1 ? kinds : undefined, kind: kind ?? singleKind, sourceLabel: text(raw.source_label ?? raw.sourceLabel) }
   }
   const drilldown = (value: unknown): Drilldown | undefined => {
     if (!value || typeof value !== 'object') return undefined
@@ -185,7 +188,8 @@ export function createFinanceApi(options: FinanceApiOptions = {}): FinanceApi {
   }
 
   return {
-    bootstrap: options => call<BootstrapResponse>('/bootstrap', { signal: options?.signal }).then(raw => ({ ...raw, categories: (raw.categories as unknown[]).map(category), accounts: (raw.accounts as unknown[]).map(account), accountMonths: raw.accountMonths ?? (raw as unknown as Record<string, unknown>).account_months as BootstrapResponse['accountMonths'] })),
+    bootstrap: options => call<BootstrapResponse>('/bootstrap', { signal: options?.signal }).then(raw => ({ ...raw, categories: (raw.categories as unknown[]).map(category), accounts: (raw.accounts as unknown[]).map(account), customIcons: (raw.customIcons ?? (raw as unknown as Record<string, unknown>).custom_icons ?? []) as string[], accountMonths: raw.accountMonths ?? (raw as unknown as Record<string, unknown>).account_months as BootstrapResponse['accountMonths'] })),
+    createCustomIcon: (emoji, revision, options) => mutation<string>('/custom-icons', { emoji }, revision, options),
     listTransactions: (filter = {}, options) => call<TransactionsResponse>(`/transactions${queryString({
       month: filter.month,
       kind: filter.kinds ?? (filter.kind ? [filter.kind] : undefined),

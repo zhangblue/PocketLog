@@ -5,5 +5,6 @@
 pub mod account_label;
 pub mod app_state;
 pub mod category;
+pub mod custom_icon;
 pub mod idempotency_request;
 pub mod transaction;

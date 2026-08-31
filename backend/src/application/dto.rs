@@ -71,6 +71,7 @@ pub struct BootstrapSnapshot {
     pub months: Vec<String>,
     pub data_revision: DataRevision,
     pub server_time: String,
+    pub custom_icons: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

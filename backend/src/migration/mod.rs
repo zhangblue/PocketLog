@@ -7,9 +7,13 @@
 use sea_orm_migration::prelude::*;
 
 mod m20260826_000001_create_ledger;
+mod m20260831_000002_create_custom_icons;
 
 // 该清单是运行时 schema 校验的基线；新增迁移必须同时注册并更新期望版本。
-pub const EXPECTED_MIGRATIONS: &[&str] = &["m20260826_000001_create_ledger"];
+pub const EXPECTED_MIGRATIONS: &[&str] = &[
+    "m20260826_000001_create_ledger",
+    "m20260831_000002_create_custom_icons",
+];
 
 pub struct Migrator;
 
@@ -18,7 +22,10 @@ impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         // 返回顺序就是 SeaORM 应用版本的顺序；EXPECTED_MIGRATIONS 与此并列维护，serve 的
         // 只读校验据它发现漏迁移或意外 schema。
-        vec![Box::new(m20260826_000001_create_ledger::Migration)]
+        vec![
+            Box::new(m20260826_000001_create_ledger::Migration),
+            Box::new(m20260831_000002_create_custom_icons::Migration),
+        ]
     }
 }
 

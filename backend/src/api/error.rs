@@ -83,6 +83,7 @@ pub fn status_for(code: &str) -> StatusCode {
         || code.starts_with("transaction.")
         || code.starts_with("amount.")
         || code.starts_with("time.")
+        || code.starts_with("custom_icon.")
         || code.ends_with("_invalid")
     {
         StatusCode::UNPROCESSABLE_ENTITY
@@ -138,6 +139,7 @@ mod tests {
             ("amount.invalid", StatusCode::UNPROCESSABLE_ENTITY),
             ("time.invalid", StatusCode::UNPROCESSABLE_ENTITY),
             ("date_invalid", StatusCode::UNPROCESSABLE_ENTITY),
+            ("custom_icon.empty", StatusCode::UNPROCESSABLE_ENTITY),
             ("unexpected", StatusCode::INTERNAL_SERVER_ERROR),
         ] {
             assert_eq!(status_for(code), expected, "code={code}");

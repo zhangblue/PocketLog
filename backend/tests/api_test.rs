@@ -51,10 +51,75 @@ fn valid_transaction_json() -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn custom_icon_api_returns_string_and_bootstrap_and_rejects_invalid_inputs() {
+    let _lock = support::test_lock().await;
+    let (app, db) = app().await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/custom-icons")
+                .header("if-match", "1")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"emoji":" 🧋 "}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"], "🧋");
+    assert_eq!(json["dataRevision"], 2);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/bootstrap")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["customIcons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "🧋")
+    );
+    for (emoji, code) in [
+        ("  ", "custom_icon.empty"),
+        ("aaaaaaaaaaaaaaaaa", "custom_icon.length_invalid"),
+        ("🧋", "custom_icon.duplicate"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/custom-icons")
+                    .header("if-match", "2")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"emoji":"{emoji}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{code}"
+        );
+        assert_eq!(response.headers()["x-error-code"], code);
+    }
+    db.cleanup().await;
+}
+
+#[tokio::test]
 async fn live_and_api_404_are_json_contracts() {
     let _lock = support::test_lock().await;
     let (app, db) = app().await;
     let response = app
+        .clone()
         .clone()
         .oneshot(Request::get("/health/live").body(Body::empty()).unwrap())
         .await
@@ -333,11 +398,88 @@ async fn patch_body_supports_rename_and_deactivate_with_revision_contract() {
     let next_revision = renamed["dataRevision"].as_i64().unwrap();
     assert_eq!(renamed["data"]["name"], "API renamed");
     let response = app
+        .clone()
         .oneshot(
             Request::patch(format!("/api/v1/categories/{id}"))
                 .header("if-match", format!("\"{next_revision}\""))
                 .header("content-type", "application/json")
                 .body(Body::from(r#"{"active":false}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let deactivated: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap()).unwrap();
+    assert_eq!(deactivated["data"]["active"], false);
+    let deactivated_revision = deactivated["dataRevision"].as_i64().unwrap();
+    let response = app
+        .oneshot(
+            Request::patch(format!("/api/v1/categories/{id}"))
+                .header("if-match", format!("\"{deactivated_revision}\""))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"active":true}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let activated: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap()).unwrap();
+    assert_eq!(activated["data"]["active"], true);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn patch_category_updates_name_and_emoji() {
+    // 此测试覆盖真实 JSON DTO、路由和写服务，防止 PATCH 只处理名称而丢弃 Emoji。
+    let _lock = support::test_lock().await;
+    let (app, db) = app().await;
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/bootstrap")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bootstrap: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap()).unwrap();
+    let category = bootstrap["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["name"] == "餐饮")
+        .unwrap();
+    let id = category["id"].as_str().unwrap();
+    let revision = bootstrap["dataRevision"].as_i64().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::patch(format!("/api/v1/categories/{id}"))
+                .header("if-match", format!("\"{revision}\""))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"name":"水电费","emoji":"💧"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await.unwrap()).unwrap();
+    assert_eq!(updated["data"]["name"], "水电费");
+    assert_eq!(updated["data"]["emoji"], "💧");
+    assert_eq!(updated["dataRevision"], revision + 1);
+
+    let next_revision = updated["dataRevision"].as_i64().unwrap();
+    let response = app
+        .oneshot(
+            Request::patch(format!("/api/v1/categories/{id}"))
+                .header("if-match", format!("\"{next_revision}\""))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"emoji":"🍜"}"#))
                 .unwrap(),
         )
         .await

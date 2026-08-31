@@ -3,13 +3,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { FinanceProvider, useFinanceState } from '../../app/FinanceProvider'
 import type { Transaction } from '../../domain/types'
 import { AppShell } from '../../layout/AppShell'
-import { click, render } from '../../test/render'
+import { click, render, settle } from '../../test/render'
 import { OverviewPage } from './OverviewPage'
 import type { FinanceApi } from '../../api/financeApi'
 import { createFixtureApi } from '../../test/financeApi'
 
-function OverviewApp() {
-  return <FinanceProvider api={createFixtureApi()}><AppShell><OverviewPage /></AppShell><FinanceProbe /></FinanceProvider>
+function OverviewApp({ transactions }: { transactions?: Transaction[] } = {}) {
+  return <FinanceProvider api={createFixtureApi({ transactions })}><AppShell><OverviewPage /></AppShell><FinanceProbe /></FinanceProvider>
 }
 
 function FinanceProbe() {
@@ -51,9 +51,44 @@ describe('OverviewPage', () => {
     expect(container.textContent).toContain('- ¥128.60')
     expect(container.querySelector('svg[role="img"]')?.getAttribute('aria-labelledby')).toBeTruthy()
     expect(container.querySelector('svg title')?.textContent).toBe('支出趋势')
-    expect(container.querySelector('svg desc')?.textContent).toContain('第 1 周')
-    expect(container.querySelector('figure figcaption')?.textContent).toMatch(/第 1 周/)
+    expect(container.querySelector('svg desc')?.textContent).toContain('2026-08-02')
+    expect(container.querySelector('figure figcaption')).toBeNull()
     expect(container.querySelector('.trend-panel.async-panel')?.textContent).toContain('支出趋势')
+  })
+
+  it('按日期展示支出趋势并在日期过多时均匀隐藏部分标签', async () => {
+    const transactions: Transaction[] = Array.from({ length: 10 }, (_, index) => ({
+      id: `daily-${index}`, kind: 'expense', amount: (index + 1) * 100, categoryId: 'food', accountId: 'cash', merchant: `商户${index}`,
+      occurredAt: `2026-08-${String(index + 1).padStart(2, '0')}T12:00:00+08:00`, note: '',
+    }))
+    const { container } = await render(<OverviewApp transactions={transactions} />)
+    const labels = [...container.querySelectorAll('[data-overview-trend-axis-label]')].map(node => node.textContent)
+    expect(labels.length).toBeLessThanOrEqual(6)
+    expect(labels[0]).toBe('08-01')
+    expect(labels[labels.length - 1]).toBe('08-10')
+    expect(container.querySelectorAll('[data-overview-trend-y-axis-label]')).toHaveLength(4)
+    expect(container.textContent).toContain('¥0')
+    expect(container.querySelectorAll('[data-overview-trend-point]')).toHaveLength(10)
+  })
+
+  it('悬停或聚焦总览趋势点时显示精确金额', async () => {
+    const { container } = await render(<OverviewApp />)
+    const point = container.querySelector<SVGCircleElement>('[data-overview-trend-point="2026-08-08"]')!
+    expect(point.getAttribute('role')).toBe('button')
+    expect(point.getAttribute('tabindex')).toBe('0')
+    expect(point.getAttribute('aria-label')).toContain('2026-08-08')
+    point.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+    expect(container.querySelector('[data-overview-trend-tooltip]')?.textContent).toContain('¥899')
+    point.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }))
+    await settle()
+    expect(container.querySelector('[data-overview-trend-tooltip]')).toBeNull()
+    point.focus()
+    await settle()
+    expect(container.querySelector('[data-overview-trend-tooltip]')?.textContent).toContain('2026-08-08 · ¥899')
+    point.blur()
+    await settle()
+    expect(container.querySelector('[data-overview-trend-tooltip]')).toBeNull()
   })
 
   it('将整数交易金额固定显示为两位小数', async () => {

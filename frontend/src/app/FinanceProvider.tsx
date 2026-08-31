@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
 import { createFinanceApi, type FinanceApi } from '../api/financeApi'
-import type { BootstrapResponse, TransactionDto } from '../api/types'
+import { FinanceApiError, type BootstrapResponse, type TransactionDto } from '../api/types'
 import type { AccountLabel, Category, Transaction, TransactionFilter, ViewId } from '../domain/types'
 import { previousMonth } from '../domain/selectors'
 import { sampleTransactions } from '../domain/sampleData'
@@ -32,8 +32,11 @@ export interface FinanceActions {
   deleteTransaction(transaction: Transaction): ActionResult
   restoreTransaction(): ActionResult
   createCategory(input: { name: string; kind: Category['kind']; emoji?: string; color?: string }): ActionResult
+  createCustomIcon(emoji: string): ActionResult
+  updateCategory(id: string, input: { name: string; emoji: string }): ActionResult
   renameCategory(id: string, name: string): ActionResult
   deactivateCategory(id: string): ActionResult
+  activateCategory(id: string): ActionResult
   reorderCategories(orderedIds: string[]): ActionResult
   deleteCategory(id: string): ActionResult
   migrateCategory(fromId: string, toId: string): ActionResult
@@ -120,7 +123,7 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
     void activeApi.bootstrap({ signal: controller.signal }).then(value => {
       if (!mountedRef.current) return
       const labels = apiLabels(value)
-      dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, dataRevision: value.dataRevision })
+      dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, customIcons: value.customIcons ?? [], dataRevision: value.dataRevision })
     }).catch(error => {
       if (!mountedRef.current || controller.signal.aborted) return
       dispatch({ type: 'bootstrap/failed', sequence, message: error instanceof Error ? error.message : '无法加载账本，请重试。' })
@@ -225,13 +228,21 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
         revisionRef.current = value.dataRevision
         categoriesRef.current = labels.categories
         accountsRef.current = labels.accounts
-        dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, dataRevision: value.dataRevision })
+        dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, customIcons: value.customIcons ?? [], dataRevision: value.dataRevision })
       }).catch(recoveryError => {
         if (mountedRef.current) dispatch({ type: 'bootstrap/failed', sequence, message: recoveryError instanceof Error ? recoveryError.message : '无法刷新账本，请重试。' })
       })
     }
     const mutationFailure = (error: unknown, fallback: string): SaveResult => {
       recoverRevisionConflict(error)
+      if (error instanceof FinanceApiError) {
+        if (error.code === 'label.name_length_invalid') return { ok: false, message: '分类名称长度不符合要求' }
+        if (error.code === 'category.in_use') return { ok: false, message: '该分类已有历史记录，请先停用或迁移' }
+        if (error.code === 'category.delete_requires_inactive') return { ok: false, message: '请先停用该分类后再删除' }
+        if (error.code === 'custom_icon.empty') return { ok: false, message: '请输入自定义图标' }
+        if (error.code === 'custom_icon.length_invalid') return { ok: false, message: '自定义图标不能超过 16 个字符' }
+        if (error.code === 'custom_icon.duplicate') return { ok: false, message: '该自定义图标已存在' }
+      }
       return { ok: false, message: error instanceof Error ? error.message : fallback }
     }
     return ({
@@ -340,6 +351,25 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
         }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
       }
     },
+    createCustomIcon: emoji => activeApi.createCustomIcon(emoji.trim(), revisionRef.current).then(result => {
+      if (!mountedRef.current) return { ok: true as const }
+      revisionRef.current = result.dataRevision
+      dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+      const value = result.data.trim()
+      dispatch({ type: 'custom-icon/created', emoji: value, dataRevision: result.dataRevision })
+      return { ok: true as const }
+    }).catch(error => mutationFailure(error, '自定义图标保存失败，请重试。')),
+    updateCategory: (id, input) => {
+      return activeApi.patchCategory(id, { name: input.name.trim(), emoji: input.emoji.trim() }, revisionRef.current).then(result => {
+        // 服务端会规范化完整分类；以它为准，避免只更新局部字段造成状态漂移。
+        const category = apiCategory(result.data)
+        revisionRef.current = result.dataRevision
+        categoriesRef.current = categoriesRef.current.map(item => item.id === id ? category : item)
+        dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+        dispatch({ type: 'labels/replaced', categories: categoriesRef.current, accounts: accountsRef.current })
+        return { ok: true as const }
+      }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
+    },
     renameCategory: (id, rawName) => {
       {
         return activeApi.patchCategory(id, { name: rawName.trim() }, revisionRef.current).then(result => {
@@ -361,6 +391,16 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
           return { ok: true as const }
         }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
       }
+    },
+    activateCategory: id => {
+      return activeApi.patchCategory(id, { active: true }, revisionRef.current).then(result => {
+        revisionRef.current = result.dataRevision
+        dispatch({ type: 'data/revision-updated', dataRevision: result.dataRevision })
+        const category = apiCategory(result.data)
+        categoriesRef.current = categoriesRef.current.map(item => item.id === id ? category : item)
+        dispatch({ type: 'labels/replaced', categories: categoriesRef.current, accounts: accountsRef.current })
+        return { ok: true as const }
+      }).catch(error => mutationFailure(error, '标签保存失败，请重试。'))
     },
     reorderCategories: orderedIds => {
       return activeApi.reorderCategories(orderedIds, revisionRef.current).then(result => {
@@ -455,7 +495,7 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
           revisionRef.current = value.dataRevision
           categoriesRef.current = labels.categories
           accountsRef.current = labels.accounts
-          dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, dataRevision: value.dataRevision })
+          dispatch({ type: 'bootstrap/succeeded', sequence, value, categories: labels.categories, accounts: labels.accounts, customIcons: value.customIcons ?? [], dataRevision: value.dataRevision })
         }).catch(error => {
           if (mountedRef.current) dispatch({ type: 'bootstrap/failed', sequence, message: error instanceof Error ? error.message : '无法加载账本，请重试。' })
         })

@@ -91,6 +91,14 @@ mod tests {
         ) -> Result<CategoryDto, AppError> {
             unused()
         }
+        async fn update_category(
+            &mut self,
+            _: Uuid,
+            _: Option<String>,
+            _: Option<String>,
+        ) -> Result<CategoryDto, AppError> {
+            unused()
+        }
         async fn set_category_active(&mut self, _: Uuid, _: bool) -> Result<CategoryDto, AppError> {
             unused()
         }
@@ -114,6 +122,9 @@ mod tests {
             unused()
         }
         async fn set_account_active(&mut self, _: Uuid, _: bool) -> Result<AccountDto, AppError> {
+            unused()
+        }
+        async fn insert_custom_icon(&mut self, _: String) -> Result<String, AppError> {
             unused()
         }
     }
@@ -182,6 +193,7 @@ mod tests {
             months: vec!["2026-08".into()],
             data_revision: crate::application::DataRevision::new(3),
             server_time: "now".into(),
+            custom_icons: vec![],
         };
         assert_eq!(
             load_bootstrap(&StubRepository {

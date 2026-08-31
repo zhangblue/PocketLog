@@ -31,6 +31,45 @@ async fn service() -> (
     (db, LabelService::new(repository))
 }
 
+#[tokio::test]
+async fn create_custom_icon_normalizes_and_advances_revision() {
+    let (db, labels) = service().await;
+    let created = labels
+        .create_custom_icon("  🧋 ", DataRevision::new(1))
+        .await
+        .unwrap();
+    assert_eq!(created.value, "🧋");
+    assert_eq!(created.data_revision, DataRevision::new(2));
+    let duplicate = labels
+        .create_custom_icon("🧋", created.data_revision)
+        .await
+        .unwrap_err();
+    assert_eq!(duplicate.code(), "custom_icon.duplicate");
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn custom_icon_rejects_empty_and_too_long_values() {
+    let (db, labels) = service().await;
+    assert_eq!(
+        labels
+            .create_custom_icon("  ", DataRevision::new(1))
+            .await
+            .unwrap_err()
+            .code(),
+        "custom_icon.empty"
+    );
+    assert_eq!(
+        labels
+            .create_custom_icon(&"a".repeat(17), DataRevision::new(1))
+            .await
+            .unwrap_err()
+            .code(),
+        "custom_icon.length_invalid"
+    );
+    db.cleanup().await;
+}
+
 async fn category_id(db: &support::TestDatabase, name: &str) -> Uuid {
     category::Entity::find()
         .filter(category::Column::Name.eq(name))
@@ -66,6 +105,47 @@ async fn category_commands_update_revision_and_normalize_names() {
         .unwrap();
     assert_eq!(renamed.value.name, "宠物用品");
     assert_eq!(renamed.data_revision, DataRevision::new(3));
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn update_category_name_and_emoji_updates_both_fields_in_one_revision() {
+    // 此测试会捕捉“名称和 Emoji 被拆成两次写入”或任一字段被静默忽略的回归。
+    let (db, labels) = service().await;
+    let id = category_id(&db, "餐饮").await;
+
+    let updated = labels
+        .update_category(
+            id,
+            Some("水电费".into()),
+            Some("💧".into()),
+            DataRevision::new(1),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(updated.value.name, "水电费");
+    assert_eq!(updated.value.emoji, "💧");
+    assert_eq!(updated.data_revision, DataRevision::new(2));
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn activate_category_restores_an_inactive_category_and_advances_revision() {
+    let (db, labels) = service().await;
+    let id = category_id(&db, "餐饮").await;
+    let deactivated = labels
+        .deactivate_category(id, DataRevision::new(1))
+        .await
+        .unwrap();
+    assert!(!deactivated.value.active);
+
+    let activated = labels
+        .activate_category(id, deactivated.data_revision)
+        .await
+        .unwrap();
+    assert!(activated.value.active);
+    assert_eq!(activated.data_revision, DataRevision::new(3));
     db.cleanup().await;
 }
 

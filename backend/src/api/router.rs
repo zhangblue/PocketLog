@@ -5,7 +5,7 @@
 
 use super::{
     dto::{
-        self, CreateTransactionRequest, MutationResponse, TransactionQueryParams,
+        self, CreateTransactionRequest, LabelPatch, MutationResponse, TransactionQueryParams,
         TransactionsResponse,
     },
     error,
@@ -48,6 +48,7 @@ pub fn build_router(db: DatabaseConnection, config: &Config) -> Router {
     };
     let api = Router::new()
         .route("/bootstrap", get(bootstrap))
+        .route("/custom-icons", post(create_custom_icon))
         .route(
             "/transactions",
             get(list_transactions).post(create_transaction),
@@ -57,7 +58,7 @@ pub fn build_router(db: DatabaseConnection, config: &Config) -> Router {
         .route("/categories", post(create_category))
         .route(
             "/categories/{id}",
-            post(rename_category).patch(rename_category),
+            post(patch_category).patch(patch_category),
         )
         .route("/categories/{id}/deactivate", post(deactivate_category))
         .route("/categories/order", axum::routing::put(reorder_categories))
@@ -298,6 +299,36 @@ async fn bootstrap(State(state): State<AppState>) -> Response {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct CustomIconBody {
+    emoji: String,
+}
+
+async fn create_custom_icon(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CustomIconBody>,
+) -> Response {
+    let expected = match revision(&headers) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    match LabelService::new(SeaOrmLedgerRepository::new(state.db))
+        .create_custom_icon(body.emoji, expected)
+        .await
+    {
+        Ok(value) => (
+            StatusCode::CREATED,
+            Json(MutationResponse {
+                data: value.value,
+                data_revision: value.data_revision,
+            }),
+        )
+            .into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
 #[allow(clippy::result_large_err)]
 fn revision(h: &HeaderMap) -> Result<crate::application::DataRevision, Response> {
     dto::revision(h).map_err(|e| e.into_response())
@@ -428,12 +459,6 @@ struct CategoryBody {
 struct NameBody {
     name: String,
 }
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LabelPatch {
-    name: Option<String>,
-    active: Option<bool>,
-}
 async fn create_category(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -458,7 +483,7 @@ async fn create_category(
         .await;
     mutation(r)
 }
-async fn rename_category(
+async fn patch_category(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<uuid::Uuid>,
@@ -475,21 +500,30 @@ async fn rename_category(
                 .await,
         );
     }
-    match b.name {
-        Some(name) => mutation(
+    if b.active == Some(true) {
+        return mutation(
             LabelService::new(SeaOrmLedgerRepository::new(state.db))
-                .rename_category(id, name, e)
+                .activate_category(id, e)
                 .await,
-        ),
-        None => error::problem(
-            "label.patch_invalid",
-            StatusCode::UNPROCESSABLE_ENTITY,
-            headers
-                .get("x-request-id")
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or(""),
-        ),
+        );
     }
+    if b.name.is_some() || b.emoji.is_some() {
+        // active 分支已在前面返回；其余名称或 Emoji 更新统一进入一个事务服务，避免两个
+        // 独立 PATCH 操作之间暴露部分结果。
+        return mutation(
+            LabelService::new(SeaOrmLedgerRepository::new(state.db))
+                .update_category(id, b.name, b.emoji, e)
+                .await,
+        );
+    }
+    error::problem(
+        "label.patch_invalid",
+        StatusCode::UNPROCESSABLE_ENTITY,
+        headers
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or(""),
+    )
 }
 async fn deactivate_category(
     State(state): State<AppState>,

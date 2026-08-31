@@ -79,6 +79,7 @@ export interface BootstrapResponse {
   dataRevision: number
   serverTime: string
   accountMonths?: Record<string, string[]>
+  customIcons: string[]
 }
 
 export interface Mutation<T> {

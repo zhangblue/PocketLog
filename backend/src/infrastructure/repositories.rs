@@ -22,7 +22,7 @@ use crate::{
     domain::TransactionKind as DomainTransactionKind,
     domain::analytics::{AnalyticsCategory, AnalyticsTransaction, OverviewFacts, Period},
     infrastructure::entities::{
-        account_label, app_state, category, idempotency_request, transaction,
+        account_label, app_state, category, custom_icon, idempotency_request, transaction,
     },
 };
 
@@ -742,6 +742,51 @@ impl LedgerTransaction for SeaOrmLedgerTransaction {
             .map_err(map_label_db_error)
     }
 
+    async fn update_category(
+        &mut self,
+        id: Uuid,
+        name: Option<String>,
+        emoji: Option<String>,
+    ) -> Result<CategoryDto, AppError> {
+        // 先读取目标行，确保“仅更新提供字段”保留未提供字段的原值，并把不存在分类统一映射为
+        // 业务错误而非静默零更新。
+        let model = category::Entity::find_by_id(id)
+            .one(&self.0)
+            .await
+            .map_err(database_error)?
+            .ok_or_else(|| AppError::new("category.not_found"))?;
+        let mut active: category::ActiveModel = model.into();
+
+        if let Some(raw_name) = name {
+            // 名称分支复用既有规范化与跨分类唯一性检查，保证原子 PATCH 与旧重命名接口契约一致。
+            let name = normalize_name(&raw_name)
+                .ok_or_else(|| AppError::new("label.name_length_invalid"))?;
+            let normalized = name.to_lowercase();
+            if category::Entity::find()
+                .filter(category::Column::NormalizedName.eq(normalized.clone()))
+                .filter(category::Column::Id.ne(id))
+                .one(&self.0)
+                .await
+                .map_err(database_error)?
+                .is_some()
+            {
+                return Err(AppError::new("label.name_conflict"));
+            }
+            active.name = Set(name);
+            active.normalized_name = Set(normalized);
+        }
+        if let Some(emoji) = emoji {
+            // Emoji 是展示字段，按协议原样保存提供值；即使只改 Emoji 也必须更新时间戳。
+            active.emoji = Set(emoji);
+        }
+        active.updated_at = Set(chrono::Utc::now().fixed_offset());
+        active
+            .update(&self.0)
+            .await
+            .map(category_dto)
+            .map_err(map_label_db_error)
+    }
+
     async fn set_category_active(
         &mut self,
         id: Uuid,
@@ -926,6 +971,29 @@ impl LedgerTransaction for SeaOrmLedgerTransaction {
             .map(account_dto)
             .map_err(database_error)
     }
+
+    async fn insert_custom_icon(&mut self, emoji: String) -> Result<String, AppError> {
+        // 唯一约束负责并发去重；服务层事务统一提交或回滚。
+        if custom_icon::Entity::find()
+            .filter(custom_icon::Column::Emoji.eq(emoji.clone()))
+            .one(&self.0)
+            .await
+            .map_err(database_error)?
+            .is_some()
+        {
+            return Err(AppError::new("custom_icon.duplicate"));
+        }
+        let now = chrono::Utc::now().fixed_offset();
+        custom_icon::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            emoji: Set(emoji.clone()),
+            created_at: Set(now),
+        }
+        .insert(&self.0)
+        .await
+        .map(|_| emoji)
+        .map_err(database_error)
+    }
 }
 
 pub(crate) fn database_error(_: DbErr) -> AppError {
@@ -967,6 +1035,14 @@ async fn bootstrap_in_snapshot(
             active: model.active,
         })
         .collect();
+    let custom_icons = custom_icon::Entity::find()
+        .order_by_asc(custom_icon::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(database_error)?
+        .into_iter()
+        .map(|model| model.emoji)
+        .collect();
     let months = db
         .query_all(Statement::from_string(
             DbBackend::Postgres,
@@ -989,6 +1065,7 @@ async fn bootstrap_in_snapshot(
         months,
         data_revision: DataRevision::new(state.data_revision),
         server_time,
+        custom_icons,
     })
 }
 

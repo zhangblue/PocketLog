@@ -37,6 +37,37 @@ where
     R: LedgerRepository + Sync + HasClock,
     R::Transaction: LedgerTransaction,
 {
+    pub async fn create_custom_icon(
+        &self,
+        raw_emoji: impl Into<String>,
+        expected: DataRevision,
+    ) -> Result<Mutation<String>, AppError> {
+        let mut tx = self.repository.begin_write().await?;
+        let state = tx.lock_app_state().await?;
+        check_revision(state.data_revision, expected)?;
+        let emoji = raw_emoji.into().trim().to_owned();
+        if emoji.is_empty() {
+            return finish(tx, Err(AppError::new("custom_icon.empty")), expected).await;
+        }
+        if !(1..=16).contains(&emoji.chars().count()) {
+            return finish(
+                tx,
+                Err(AppError::new("custom_icon.length_invalid")),
+                expected,
+            )
+            .await;
+        }
+        let result = async {
+            let value = tx.insert_custom_icon(emoji).await?;
+            let revision = tx.increment_data_revision().await?;
+            Ok(Mutation {
+                value,
+                data_revision: revision,
+            })
+        }
+        .await;
+        finish(tx, result, expected).await
+    }
     pub async fn create_category(
         &self,
         input: CreateCategory,
@@ -71,6 +102,30 @@ where
         check_revision(state.data_revision, expected)?;
         let result = async {
             let value = tx.update_category_name(id, name.into()).await?;
+            let revision = tx.increment_data_revision().await?;
+            Ok(Mutation {
+                value,
+                data_revision: revision,
+            })
+        }
+        .await;
+        finish(tx, result, expected).await
+    }
+
+    pub async fn update_category(
+        &self,
+        id: Uuid,
+        name: Option<String>,
+        emoji: Option<String>,
+        expected: DataRevision,
+    ) -> Result<Mutation<CategoryDto>, AppError> {
+        // 先锁定 revision，再在同一事务内完成所有字段更新与版本推进；任一步失败都由 finish
+        // 回滚，避免名称已保存但 Emoji 或修订版本尚未写入的半完成状态。
+        let mut tx = self.repository.begin_write().await?;
+        let state = tx.lock_app_state().await?;
+        check_revision(state.data_revision, expected)?;
+        let result = async {
+            let value = tx.update_category(id, name, emoji).await?;
             let revision = tx.increment_data_revision().await?;
             Ok(Mutation {
                 value,
@@ -123,6 +178,26 @@ where
                 .map_err(domain_error)?;
             validate_category_deactivation(&domain_target, &all).map_err(domain_error)?;
             let value = tx.set_category_active(id, false).await?;
+            let revision = tx.increment_data_revision().await?;
+            Ok(Mutation {
+                value,
+                data_revision: revision,
+            })
+        }
+        .await;
+        finish(tx, result, expected).await
+    }
+
+    pub async fn activate_category(
+        &self,
+        id: Uuid,
+        expected: DataRevision,
+    ) -> Result<Mutation<CategoryDto>, AppError> {
+        let mut tx = self.repository.begin_write().await?;
+        let state = tx.lock_app_state().await?;
+        check_revision(state.data_revision, expected)?;
+        let result = async {
+            let value = tx.set_category_active(id, true).await?;
             let revision = tx.increment_data_revision().await?;
             Ok(Mutation {
                 value,
