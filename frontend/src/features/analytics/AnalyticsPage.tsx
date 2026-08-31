@@ -72,6 +72,10 @@ export function AnalyticsPage() {
   const maxTrend = Math.max(...trend.map(item => item.amount), 0)
   const trendScale = trendScaleMax(maxTrend)
   const trendYTicks = Array.from({ length: TREND_Y_AXIS_TICKS }, (_, index) => trendScale * (TREND_Y_AXIS_TICKS - index - 1) / (TREND_Y_AXIS_TICKS - 1))
+  // 数据点较多时均匀抽取日期标签，避免横轴文字互相遮挡；金额仍只通过纵轴和提示展示。
+  const trendAxisIndexes = trend.length <= 6
+    ? trend.map((_, index) => index)
+    : Array.from({ length: 6 }, (_, slot) => Math.round(slot * (trend.length - 1) / 5))
   const trendTitleId = useId()
   const trendDescriptionId = useId()
 
@@ -211,6 +215,11 @@ export function AnalyticsPage() {
                       />
                     </g>
                   )
+                })}
+                {trendAxisIndexes.map(index => {
+                  const item = trend[index]
+                  const slotWidth = TREND_CHART_WIDTH / Math.max(trend.length, 1)
+                  return <text key={item.date} data-trend-axis-label className="analytics-trend-axis-label" x={TREND_CHART_LEFT + index * slotWidth + slotWidth / 2} y={174} textAnchor="middle">{item.date.slice(5)}</text>
                 })}
                 {trendTooltip && (() => {
                   const slotWidth = TREND_CHART_WIDTH / Math.max(trend.length, 1)

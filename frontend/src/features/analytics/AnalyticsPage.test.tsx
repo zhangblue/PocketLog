@@ -67,7 +67,7 @@ describe('AnalyticsPage', () => {
   it('为支出趋势提供自适应坐标，并在悬停或聚焦柱子时显示精确金额', async () => {
     const { container } = await render(<App initialView="analytics" />)
 
-    expect(container.querySelectorAll('[data-trend-axis-label]')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-trend-axis-label]').length).toBeGreaterThan(0)
     const yAxisLabels = [...container.querySelectorAll('[data-trend-y-axis-label]')].map(label => label.textContent)
     expect(yAxisLabels).toHaveLength(4)
     expect(yAxisLabels).toContain('¥0')
@@ -88,7 +88,7 @@ describe('AnalyticsPage', () => {
     expect(container.querySelector('[data-trend-tooltip]')).toBeNull()
   })
 
-  it('在日期较多时不显示趋势底部日期标签', async () => {
+  it('在日期较多时均匀显示部分趋势底部日期标签', async () => {
     const transactions: Transaction[] = Array.from({ length: 8 }, (_, index) => ({
       id: `daily-expense-${index + 1}`,
       kind: 'expense' as const,
@@ -101,7 +101,10 @@ describe('AnalyticsPage', () => {
     }))
     const { container } = await render(<App initialView="analytics" api={createFixtureApi({ transactions })} />)
 
-    expect(container.querySelectorAll('[data-trend-axis-label]')).toHaveLength(0)
+    const labels = [...container.querySelectorAll('[data-trend-axis-label]')].map(label => label.textContent)
+    expect(labels.length).toBeLessThanOrEqual(6)
+    expect(labels[0]).toBe('08-01')
+    expect(labels[labels.length - 1]).toBe('08-08')
     expect(container.querySelector('.analytics-trend-panel figcaption')).toBeNull()
   })
 
