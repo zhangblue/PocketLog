@@ -52,9 +52,9 @@ npm --prefix frontend run build
 npm --prefix frontend run dev
 ```
 
-### 3. 显式执行数据库迁移
+### 3. 初始化数据库 schema
 
-`serve` 启动时不会自动迁移数据库。首次运行或 schema 更新后，必须先显式执行一次 `migrate`：
+`migrate` 只创建或更新数据库 schema，不会插入分类、账户、交易或其他演示数据。`serve` 启动时不会自动迁移数据库；首次运行或 schema 更新后，必须先显式执行一次 `migrate`：
 
 ```bash
 DATABASE_URL='postgresql://<user>:<password>@127.0.0.1:5432/<database>' cargo run --manifest-path backend/Cargo.toml -- migrate
@@ -62,7 +62,23 @@ DATABASE_URL='postgresql://<user>:<password>@127.0.0.1:5432/<database>' cargo ru
 
 例如，你当前本地环境可以替换为自己的实际连接串；不要把真实密码写入 README 或提交到仓库。
 
-### 4. 启动后端
+### 4. （可选）写入演示数据
+
+如果希望使用内置示例账本，在 `migrate` 成功后先写入预置分类，再执行演示数据命令：
+
+```bash
+DATABASE_URL='postgresql://<user>:<password>@127.0.0.1:5432/<database>' cargo run --manifest-path backend/Cargo.toml -- init
+```
+
+`init` 只补齐缺失的预置分类，按分类名称幂等执行，不会创建账户或交易。当前预置分类为：支出类“餐饮、交通、购物、居住、娱乐、通讯、网络、水费、电费”，收入类“工资、其他”。
+
+```bash
+DATABASE_URL='postgresql://<user>:<password>@127.0.0.1:5432/<database>' cargo run --manifest-path backend/Cargo.toml -- demo
+```
+
+`demo` 要求预置分类已经初始化，并且只会在空账本中写入演示账户和交易；不会再创建预置分类。如果账本已有账户、交易或自定义图标，则不会追加或覆盖任何数据。需要重新生成演示数据时，先确认数据可以删除，再依次执行 `clean`、`init`、`demo`。
+
+### 5. 启动后端
 
 ```bash
 DATABASE_URL='postgresql://<user>:<password>@127.0.0.1:5432/<database>' FRONTEND_DIST_DIR='/absolute/path/to/frontend/dist' cargo run --manifest-path backend/Cargo.toml -- serve
@@ -72,8 +88,11 @@ DATABASE_URL='postgresql://<user>:<password>@127.0.0.1:5432/<database>' FRONTEND
 
 命令边界如下：
 
-- `migrate`：只负责显式变更数据库 schema。
-- `serve`：只校验 schema、准备静态资源和演示数据，然后启动服务。
+- `migrate`：只负责显式创建或更新数据库 schema，不插入业务数据。
+- `init`：只补齐缺失的十一项预置分类，按名称幂等，不创建账户、交易或图标。
+- `demo`：要求先执行 `init`，只在空账本中写入演示账户和交易；已有数据时不执行写入。
+- `clean`：删除账本中的全部业务数据（交易、分类、账户、自定义图标等），保留表结构和迁移记录；此操作不可恢复，请谨慎执行。
+- `serve`：只校验 schema、准备静态资源并启动服务，不写入账本数据。
 - `package`：只负责构建前端与后端，并组装发行包，不连接数据库。
 
 默认情况下，不带参数运行后端等价于执行 `serve`。
@@ -151,19 +170,36 @@ cargo run --manifest-path backend/Cargo.toml -- package
 
 3. 编辑发行目录中的 `config.toml`，填写目标环境的数据库地址和监听配置。
 
-4. 如果目标数据库尚未完成 schema 初始化，先显式执行迁移：
+4. 首次部署按以下顺序初始化并启动：先迁移 schema，再执行 `init` 写入预置分类；如需示例数据，再执行 `demo`，最后启动服务。
+
+如果目标数据库尚未完成 schema 初始化，先显式执行迁移：
 
 ```bash
 ./pocket-log-backend migrate
 ```
 
-5. 迁移完成后，直接启动同级可执行文件：
+如需示例数据，可在迁移成功后执行：
+
+```bash
+./pocket-log-backend init
+./pocket-log-backend demo
+```
+
+演示数据只会写入空账本，不会混入已有真实数据。迁移完成（以及可选的演示数据初始化完成）后，直接启动同级可执行文件：
 
 ```bash
 ./pocket-log-backend
 ```
 
 程序启动后会同时提供前端页面和 `/api/v1` 接口。
+
+如需清空当前账本的全部业务数据，可执行：
+
+```bash
+./pocket-log-backend clean
+```
+
+`clean` 不会删除数据库表或迁移记录，但会删除交易、分类、账户、自定义图标等账本数据。该操作不可恢复，请在确认备份后执行；清理后需要依次执行 `init`、`demo` 重新生成示例账本。
 
 ### 配置加载规则
 
@@ -213,7 +249,11 @@ logs/PocketLog-YYYY-MM-DD.jsonl
 
 部署时需要特别注意：
 
-- `serve` 不会自动迁移数据库。
+- `migrate` 只变更 schema，不插入数据。
+- `init` 只补齐缺失的十一项预置分类，重复执行不会插入重复分类。
+- `demo` 只在已初始化分类且为空账本中插入演示数据。
+- `clean` 清空业务数据但保留 schema，且不会自动重新插入演示数据。
+- `serve` 不会自动迁移数据库，也不会插入演示数据。
 - 直接运行 `./pocket-log-backend` 的默认行为也是 `serve`。
 - 数据库 schema 变更只能通过显式 `migrate` 完成。
 

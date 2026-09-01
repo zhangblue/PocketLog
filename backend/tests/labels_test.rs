@@ -217,12 +217,20 @@ async fn ordering_requires_complete_ids_and_deactivation_is_guarded() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), "category.order_incomplete");
-    let salary = categories
-        .iter()
-        .find(|item| item.kind == "income")
-        .unwrap();
-    let err = labels
+    let salary = categories.iter().find(|item| item.name == "工资").unwrap();
+    labels
         .deactivate_category(salary.id, DataRevision::new(1))
+        .await
+        .expect("工资停用后仍应保留收入“其他”分类");
+    let other_income = category::Entity::find()
+        .filter(category::Column::Kind.eq("income"))
+        .filter(category::Column::Active.eq(true))
+        .one(&db.db)
+        .await
+        .unwrap()
+        .expect("must retain one active income category");
+    let err = labels
+        .deactivate_category(other_income.id, DataRevision::new(2))
         .await
         .unwrap_err();
     assert_eq!(err.code(), "category.last_active_for_kind");
