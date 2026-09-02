@@ -1,5 +1,4 @@
 import type { AccountLabel, Category, Transaction, TransactionFilter, ViewId } from '../domain/types'
-import { sampleAccounts, sampleCategories, sampleTransactions } from '../domain/sampleData'
 import { daysInMonth, isValidCalendarDate, isValidMonth, previousMonth } from '../domain/selectors'
 import type { BootstrapResponse, OverviewResponse, MonthlyReportResponse, TransactionsResponse } from '../api/types'
 
@@ -73,9 +72,9 @@ export function createInitialFinanceState(now = new Date()): FinanceState {
   view: 'overview',
   month,
   filter: { month },
-  transactions: sampleTransactions,
-  categories: sampleCategories,
-  accounts: sampleAccounts,
+  transactions: [],
+  categories: [],
+  accounts: [],
   customIcons: [],
   drawerOpen: false,
   analytics: { range: 'month', ...monthBounds(month), scrollTop: 0, scrollRestorePending: false },

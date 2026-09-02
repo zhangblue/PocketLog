@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sampleTransactions } from '../domain/sampleData'
+import { sampleCategories, sampleTransactions } from '../domain/sampleData'
 import { createInitialFinanceState, financeReducer, initialFinanceState } from './financeReducer'
 
 describe('financeReducer', () => {
@@ -10,6 +10,14 @@ describe('financeReducer', () => {
     expect(state.filter.month).toBe('2031-02')
     expect(state.analytics).toMatchObject({ startDate: '2031-02-01', endDate: '2031-02-28' })
     expect(state.dataStatus).toBe('loading')
+  })
+
+  it('首次加载不展示样例账本数据', () => {
+    const state = createInitialFinanceState(new Date(2026, 7, 18, 12, 0))
+
+    expect(state.transactions).toEqual([])
+    expect(state.categories).toEqual([])
+    expect(state.accounts).toEqual([])
   })
 
   it('洞察下钻同时切换页面和筛选', () => {
@@ -111,6 +119,7 @@ describe('financeReducer', () => {
   it('迁移分类时更新所有引用并删除旧分类', () => {
     const state = {
       ...initialFinanceState,
+      categories: sampleCategories,
       transactions: [
         { ...sampleTransactions[0], categoryId: 'food' },
         { ...sampleTransactions[1], categoryId: 'transport' },
@@ -124,13 +133,14 @@ describe('financeReducer', () => {
   })
 
   it('排序动作只按给定 ID 重排，不丢失未指定分类', () => {
-    const next = financeReducer(initialFinanceState, {
+    const state = { ...initialFinanceState, categories: sampleCategories }
+    const next = financeReducer(state, {
       type: 'category/reordered',
       orderedIds: ['salary', 'food'],
     })
 
     expect(next.categories.slice(0, 2).map(item => item.id)).toEqual(['salary', 'food'])
-    expect(next.categories).toHaveLength(initialFinanceState.categories.length)
+    expect(next.categories).toHaveLength(sampleCategories.length)
   })
 
   it('mutation revision 只接受更新版本并触发面板刷新代次', () => {

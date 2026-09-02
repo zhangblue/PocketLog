@@ -1,4 +1,4 @@
-import { afterEach, vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { cleanupRenderedRoots } from './render'
 import { createFixtureFetch } from './financeApi'
 
@@ -28,6 +28,11 @@ function resetScrollEnvironment() {
 
 resetScrollEnvironment()
 vi.stubGlobal('fetch', createFixtureFetch())
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-08-18T12:00:00+08:00'))
+})
 
 afterEach(async () => {
   await cleanupRenderedRoots()

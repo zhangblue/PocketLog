@@ -96,7 +96,24 @@ function CategoryErrorProbe() {
   return <><output data-testid="category-error-result">{result}</output><button type="button" onClick={() => void Promise.resolve(actions.createCategory({ name: '过长分类', kind: 'expense' })).then(value => setResult(JSON.stringify(value)))}>创建无效分类</button></>
 }
 
+function FilterProbe() {
+  const { actions } = useFinance()
+  return <button type="button" onClick={() => actions.changeFilter({ month: '2026-08', kind: 'expense' })}>筛选支出</button>
+}
+
 describe('FinanceProvider', () => {
+  it('变更筛选时不重新加载 bootstrap 数据', async () => {
+    const api = createFixtureApi()
+    const bootstrap = vi.spyOn(api, 'bootstrap')
+    const { container } = await render(<FinanceProvider api={api}><FilterProbe /></FinanceProvider>)
+
+    expect(bootstrap).toHaveBeenCalledTimes(1)
+
+    await click(container.querySelector('button')!)
+
+    expect(bootstrap).toHaveBeenCalledTimes(1)
+  })
+
   it('显式 API 测试装配保持 ready，不经过真实 App 的首次 loading', async () => {
     const { container } = await render(<FinanceProvider api={createFixtureApi({ transactions: sampleTransactions })}><MonthProbe /></FinanceProvider>)
 

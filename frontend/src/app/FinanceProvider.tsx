@@ -3,7 +3,6 @@ import { createFinanceApi, type FinanceApi } from '../api/financeApi'
 import { FinanceApiError, type BootstrapResponse, type TransactionDto } from '../api/types'
 import type { AccountLabel, Category, Transaction, TransactionFilter, ViewId } from '../domain/types'
 import { previousMonth } from '../domain/selectors'
-import { sampleTransactions } from '../domain/sampleData'
 import { createInitialFinanceState, financeReducer, type AnalyticsContext, type FinanceState } from './financeReducer'
 
 const UNDO_DURATION = 5000
@@ -93,7 +92,6 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
       const base = {
         ...fresh,
         view: initialView ?? fresh.view,
-        transactions: sampleTransactions,
         categories: initialCategories ?? fresh.categories,
         accounts: initialAccounts ?? fresh.accounts,
         dataStatus: 'loading' as const,
@@ -129,7 +127,7 @@ export function FinanceProvider({ children, initialView, initialFilter, initialC
       dispatch({ type: 'bootstrap/failed', sequence, message: error instanceof Error ? error.message : '无法加载账本，请重试。' })
     })
     return () => controller.abort()
-  }, [activeApi, state.filter, state.transactionCursor, state.transactionsLoadingMore])
+  }, [activeApi])
 
   useEffect(() => {
     if (state.bootstrap.status !== 'ready') return undefined
